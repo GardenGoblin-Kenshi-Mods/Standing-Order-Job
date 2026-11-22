@@ -4,11 +4,11 @@ set -euo pipefail
 : "${KENSHI_PATH:?Set KENSHI_PATH to the Kenshi install.}"
 
 mod_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-package="$mod_root/out/{{ assembly_name }}"
+package="$mod_root/out/StandingOrderJob"
 staging="$mod_root/out/staging"
-target="$KENSHI_PATH/mods/{{ assembly_name }}"
+target="$KENSHI_PATH/mods/StandingOrderJob"
 
-if [[ ! -f "$package/{{ assembly_name }}.mod" || ! -f "$package/meitou.json" || ! -f "$package/{{ assembly_name }}.dll" ]]; then
+if [[ ! -f "$package/StandingOrderJob.mod" || ! -f "$package/meitou.json" || ! -f "$package/StandingOrderJob.dll" ]]; then
     printf 'Package is incomplete. Run ./tools/package.sh first.\n' >&2
     exit 1
 fi
@@ -25,6 +25,6 @@ fi
 
 mkdir -p "$KENSHI_PATH/mods" "$staging"
 ln -sfn "$package" "$target"
-printf '{{ assembly_name }}.mod\n' > "$staging/mods.cfg"
+printf 'StandingOrderJob.mod\n' > "$staging/mods.cfg"
 printf 'Staged %s\n' "$target"
 printf 'Load order: %s\n' "$staging/mods.cfg"

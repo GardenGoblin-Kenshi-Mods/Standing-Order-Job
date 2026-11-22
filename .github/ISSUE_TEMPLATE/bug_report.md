@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem in {{ mod_name }}
+about: Report a problem in Standing Order Job
 title: "[bug] "
 labels: bug
 ---
@@ -12,7 +12,7 @@ labels: bug
 ## Meitou / mod versions
 
 - Meitou:
-- {{ mod_name }} (`meitou.json` version):
+- Standing Order Job (`meitou.json` version):
 - Load order:
 
 ## Reproduction

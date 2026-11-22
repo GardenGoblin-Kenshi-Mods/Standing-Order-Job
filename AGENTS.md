@@ -1,14 +1,13 @@
-# Agent notes — {{ mod_name }}
+# Agent notes — Standing Order Job
 
-{% if include_agents_md %}
+
+- This repo is a playable Meitou mod submodule (`mods/standing-order-job`), not the Copier template.
 - Prefer Factory-wide skills in the Kenshi-Mods superproject when this mod is checked out as a submodule.
 - Keep gameplay logic in `src/`; keep packaging in `tools/`.
 - After package-affecting changes, run `./tools/package.sh` then `./tools/stage.sh` with `MEITOU_CLIENT_ROOT` and `KENSHI_PATH` set.
-- Gate diagnostics behind `MEITOU_{{ mod_slug | replace('-', '_') | upper }}_DEBUG=1`; never spam the player with debug messages.
+- Gate diagnostics behind `MEITOU_STANDING_ORDER_JOB_DEBUG=1`; never spam the player with debug messages.
 - Do not commit original Kenshi files, Workshop downloads, saves, or credentials.
 - Template tip (v0.2.0): prefer Conventional Commits and keep player-facing release notes in CHANGELOG.md.
 - Template tip (v0.2.1): document load-order assumptions in the README acceptance brief.
 - Template tip (v0.3.0): when `include_release_please` is on, let release-please open the release PR; merge it to tag and publish the GitHub Release (see Factory skill `meitou-mod-release-please`).
-{% else %}
-Mod-local AGENTS.md was generated with `include_agents_md=false`. Re-run Copier with that answer enabled if you want the fuller checklist.
-{% endif %}
+

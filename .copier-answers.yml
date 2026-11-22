@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.3.0
+_src_path: gh:GardenGoblin-Kenshi-Mods/mod-template
+api_version: 2
+assembly_name: StandingOrderJob
+author: Garden Goblin
+description: Per-character Stand Here permanent job via hold-right-click context menu.
+game_version: '>=0.22.2 <0.23.0'
+include_agents_md: true
+include_ci: true
+include_release_please: true
+license_spdx: UNLICENSED
+mod_name: Standing Order Job
+mod_slug: standing-order-job
+repo_url: https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job

@@ -3,8 +3,8 @@
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>{{ assembly_name }}</RootNamespace>
-    <AssemblyName>{{ assembly_name }}</AssemblyName>
+    <RootNamespace>StandingOrderJob</RootNamespace>
+    <AssemblyName>StandingOrderJob</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

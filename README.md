@@ -1,68 +1,51 @@
-# Kenshi Meitou mod template
+# Standing Order Job
 
-Versioned [Copier](https://copier.readthedocs.io/) template for independent Meitou C# mod repositories. Used by the [Kenshi-Mods](https://github.com/g4rd3ng0bl1n/Kenshi-Mods) Factory as the submodule at `mods/kenshi-mod-template` → `git@github.com:GardenGoblin-Kenshi-Mods/mod-template.git` (pilot path; not a playable mod).
+Independent Meitou mod repository, checked out in the Factory as `mods/standing-order-job` (`git@github.com:GardenGoblin-Kenshi-Mods/Standing-Order-Job.git`). Migrated from the Factory-local `mods/standing-order-job` tree.
 
-Copier and Python are **bootstrap/update tooling only**. Generated mods build with `dotnet` and Meitou; they do not depend on Copier at runtime.
+A Meitou code mod that adds a `Stand Here` permanent job. The player assigns it by holding right-click on a player character and choosing `Stand Here`; Shift makes that action a permanent job, following the game's existing context-menu convention.
 
-## Generate a mod
+## Acceptance brief
 
-From the Factory checkout (preferred):
+- A player character's hold-right-click menu offers `Stand Here` when the character is eligible for player orders (selected, non-animal player character).
+- Choosing the unshifted action orders the selected eligible characters to the clicked character's current position once.
+- Choosing it with Shift adds or updates a visible `Stand Here` job for each selected eligible character. Each job owns one standing position.
+- A character with that job walks to its assigned position, then remains there until a higher-priority interruption or a player order replaces/removes the job.
+- Combat, incapacity, carrying and other standard task interruptions use the engine's normal task precedence; an eligible character resumes its standing job afterward.
+- The job observes the Jobs toggle and can be removed in the normal Jobs panel.
+- Assigned positions survive save/load through the mod's save data.
+- Job list order matters: an always-eligible `Stand Here` blocks later jobs listed below it (same class of behaviour as Bodyguard). Reassigning updates the job in place so it keeps its index.
 
-```bash
-./tools/new-mod.sh /path/to/new-mod-dir
+## Package
+
+Classification: Meitou C# code mod. FCS data cannot add a context-menu action, retain per-character world positions, or supply custom job behavior.
+
+Dependencies: Meitou code-mod API 2. Job type number `1000` (`SimulationExtensions.FirstModCode`), named `Stand Here`. Compatible range pinned in `meitou.json` as `gameVersion` `>=0.22.2 <0.23.0`. No Kenshi assets, Workshop downloads, or RE_Kenshi DLLs are required.
+
+Intended load order:
+
+```text
+StandingOrderJob.mod
 ```
 
-Or directly:
+Build and stage (disposable symlink + `out/staging/mods.cfg` only; never edits the player's live `data/mods.cfg`):
 
 ```bash
-# From Factory, after submodule init:
-./tools/copier.sh copy mods/kenshi-mod-template /path/to/new-mod-dir --trust
-
-# Or from a tagged template clone:
-copier copy --trust gh:GardenGoblin-Kenshi-Mods/mod-template /path/to/new-mod-dir
+export MEITOU_CLIENT_ROOT=/path/to/MeitouClient
+export KENSHI_PATH=/path/to/Kenshi
+./tools/package.sh
+./tools/stage.sh
 ```
 
-Answer the prompts (mod name, slug, assembly, etc.). Review `.copier-answers.yml` before committing; omit secrets (none are requested by this template).
+Package folder `out/StandingOrderJob/` contains `StandingOrderJob.mod`, `meitou.json`, and `StandingOrderJob.dll`.
 
-## Update a generated mod
+### Debug trace
 
-```bash
-./tools/update-mod-from-template.sh /path/to/generated-mod
-# or:
-cd /path/to/generated-mod && copier update --trust
-```
+Set `MEITOU_STANDING_ORDER_JOB_DEBUG=1` before launching Meitou. The mod writes transition lines to Meitou's `log.txt` prefixed with `mod       standing-order-job:` (command receipt, assign, walk/hold/stop, prune). It never posts player-facing diagnostic messages.
 
-Review the diff. Resolve conflicts intentionally; Copier will not silently overwrite your customizations when answers and template markers disagree.
+## Documentation
 
-## Versioning
+- `docs/implementation-plan.md`: implementation and validation plan.
 
-Template releases use SemVer tags (`v0.1.0`, …). Prefer copying from a tag for reproducible pilots:
+### Releases
 
-```bash
-copier copy --trust --vcs-ref v0.1.0 gh:GardenGoblin-Kenshi-Mods/mod-template /path/to/new-mod-dir
-```
-
-### Generated-mod releases (release-please)
-
-When `include_release_please` is true (default), generated mods receive:
-
-- `release-please-config.json` — `simple` strategy; bumps `version.txt` and `meitou.json` `version`
-- `.release-please-manifest.json` — bootstrapped at `0.0.0`
-- `version.txt`
-- `.github/workflows/release-please.yml` — runs [googleapis/release-please-action](https://github.com/googleapis/release-please-action) on `main` / `workflow_dispatch`
-
-Use Conventional Commits (`feat:`, `fix:`, …). Merging the release PR tags the repo and creates the GitHub Release. Factory agents: `.agents/skills/meitou-mod-release-please`.
-
-## Layout baseline
-
-Derived from Factory mods (especially `standing-order-job`): `meitou.json`, `src/`, `tools/package.sh` + `stage.sh`, README acceptance brief, optional CI and `AGENTS.md`. See [docs/audit-matrix.md](docs/audit-matrix.md).
-
-## Adopting an existing mod
-
-Existing Factory mods were not generated by Copier. See [docs/adoption.md](docs/adoption.md) before attempting `copier update` on them.
-
-## Guardrails
-
-- Do not embed Steam Workshop or Nexus credentials.
-- Do not treat this repository as a staged game package.
-- Prefer reviewable PRs when propagating template updates into real mods.
+This repo uses [release-please](https://github.com/googleapis/release-please) (`include_release_please` from template `v0.3.0`). Conventional Commits on `main` open a release PR; merging it tags the version and publishes the GitHub Release (`version.txt` + `meitou.json` `version`).
