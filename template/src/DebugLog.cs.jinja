@@ -1,0 +1,11 @@
+using Meitou.Modding;
+
+namespace {{ assembly_name }};
+
+static class DebugLog
+{
+    public static Action<string> Of(ModContext context) =>
+        Environment.GetEnvironmentVariable("MEITOU_{{ mod_slug | replace('-', '_') | upper }}_DEBUG") == "1"
+            ? context.Log
+            : static _ => { };
+}

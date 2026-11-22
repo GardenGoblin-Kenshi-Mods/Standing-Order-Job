@@ -1,0 +1,16 @@
+using Meitou.Data.Fcs;
+
+if (args.Length != 1)
+{
+    Console.Error.WriteLine("Usage: {{ assembly_name }}Package <output .mod path>");
+    return 2;
+}
+
+var mod = new FcsFile
+{
+    Author = "{{ author }}",
+    Description = "{{ description | replace('\"', '\\\"') }}",
+    NextId = 1,
+};
+FcsWriter.WriteFile(mod, args[0]);
+return 0;

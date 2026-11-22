@@ -1,0 +1,47 @@
+# {{ mod_name }}
+
+{{ description }}
+
+{% if repo_url %}Repository: {{ repo_url }}
+{% endif %}
+## Acceptance brief
+
+- Replace this section with player-visible behavior and observable tests.
+- List dependencies, load order, and Meitou/`gameVersion` expectations.
+- Prefer data/rebind solutions before adding C# behavior.
+
+## Package
+
+Classification: Meitou C# code mod (`apiVersion` {{ api_version }}).
+
+Compatible range pinned in `meitou.json` as `gameVersion` `{{ game_version }}`. No Kenshi assets, Workshop downloads, or RE_Kenshi DLLs are required by this scaffold.
+
+Intended load order:
+
+```text
+{{ assembly_name }}.mod
+```
+
+Build and stage (disposable symlink + `out/staging/mods.cfg` only; never edits the player's live `data/mods.cfg`):
+
+```bash
+export MEITOU_CLIENT_ROOT=/path/to/MeitouClient
+export KENSHI_PATH=/path/to/Kenshi
+./tools/package.sh
+./tools/stage.sh
+```
+
+Package folder `out/{{ assembly_name }}/` contains `{{ assembly_name }}.mod`, `meitou.json`, and `{{ assembly_name }}.dll`.
+
+### Debug trace
+
+Set `MEITOU_{{ mod_slug | replace('-', '_') | upper }}_DEBUG=1` before launching Meitou. The mod writes transition lines to Meitou's `log.txt` prefixed for this mod. It never posts player-facing diagnostic messages.
+
+## Documentation
+
+- `docs/implementation-notes.md`: design and validation notes for this mod.
+{% if include_agents_md %}- `AGENTS.md`: mod-local agent guidance complementary to the Factory skills.
+{% endif %}
+## Template provenance
+
+Generated from `kenshi-mod-template` via Copier. Answers live in `.copier-answers.yml` (safe to commit; contains no secrets). Update with `copier update` from a tagged template revision.

@@ -1,0 +1,40 @@
+{% if include_ci %}
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check scaffold files
+        run: |
+          test -f meitou.json
+          test -f src/{{ assembly_name }}.csproj
+          test -x tools/package.sh
+          test -x tools/stage.sh
+          python3 -m json.tool meitou.json >/dev/null
+
+  # Optional Meitou build stays commented until MeitouClient is available in CI.
+  # Uncomment inside a Jinja raw block if adding GitHub Actions expressions.
+{% raw %}
+  # build:
+  #   needs: layout
+  #   runs-on: ubuntu-latest
+  #   if: ${{ vars.MEITOU_CLIENT_AVAILABLE == 'true' }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-dotnet@v4
+  #       with:
+  #         dotnet-version: "11.0.x"
+  #     - run: ./tools/package.sh
+  #       env:
+  #         MEITOU_CLIENT_ROOT: ${{ vars.MEITOU_CLIENT_ROOT }}
+{% endraw %}
+{% else %}
+# CI omitted (include_ci=false). Re-run Copier with include_ci=true to restore.
+{% endif %}

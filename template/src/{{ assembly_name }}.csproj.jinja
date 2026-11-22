@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>{{ assembly_name }}</RootNamespace>
+    <AssemblyName>{{ assembly_name }}</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MeitouClientRoot)/src/Meitou.Game/Meitou.Game.csproj" Private="false" />
+  </ItemGroup>
+
+  <Target Name="RequireMeitouClientRoot" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(MeitouClientRoot)' == ''"
+           Text="Set MeitouClientRoot to the MeitouClient checkout before building this mod." />
+  </Target>
+</Project>

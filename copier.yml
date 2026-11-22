@@ -1,0 +1,71 @@
+_subdirectory: template
+_min_copier_version: "9.0.0"
+_answers_file: .copier-answers.yml
+_exclude:
+  - "*.pyc"
+  - "__pycache__"
+  - ".git"
+  - ".git/**"
+
+mod_name:
+  type: str
+  help: Human-readable mod name (e.g. Standing Order Job)
+  default: Sample Mod
+
+mod_slug:
+  type: str
+  help: Directory / package id slug (kebab-case)
+  default: sample-mod
+
+assembly_name:
+  type: str
+  help: C# assembly / project name (PascalCase)
+  default: SampleMod
+
+description:
+  type: str
+  help: Short package description
+  default: Minimal Meitou code mod generated from kenshi-mod-template.
+
+author:
+  type: str
+  help: FCS / package author string
+  default: Kenshi Mods Factory
+
+repo_url:
+  type: str
+  help: Public repository URL (optional)
+  default: ""
+
+game_version:
+  type: str
+  help: meitou.json gameVersion range
+  default: ">=0.22.2 <0.23.0"
+
+api_version:
+  type: int
+  help: Meitou code-mod API version
+  default: 2
+
+include_ci:
+  type: bool
+  help: Include a thin GitHub Actions CI workflow
+  default: true
+
+include_release_please:
+  type: bool
+  help: Include release-please config, version.txt, and GitHub Actions release workflow
+  default: true
+
+include_agents_md:
+  type: bool
+  help: Include AGENTS.md with mod-local agent notes
+  default: true
+
+license_spdx:
+  type: str
+  help: SPDX license id for LICENSE file (placeholder text)
+  default: UNLICENSED
+
+_tasks:
+  - "chmod +x tools/package.sh tools/stage.sh || true"
