@@ -1,5 +1,7 @@
 # Standing Order Job
 
+![Standing Order Job](assets/Standing Order Job_readme_banner.png)
+
 Independent Meitou mod repository, checked out in the Factory as `mods/standing-order-job` (`git@github.com:GardenGoblin-Kenshi-Mods/Standing-Order-Job.git`). Migrated from the Factory-local `mods/standing-order-job` tree.
 
 A Meitou code mod that adds a `Stand Here` permanent job. The player assigns it by holding right-click on a player character and choosing `Stand Here`; Shift makes that action a permanent job, following the game's existing context-menu convention.
