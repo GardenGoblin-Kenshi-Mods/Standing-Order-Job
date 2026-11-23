@@ -1,8 +1,10 @@
 {
   "id": "standing-order-job",
   "apiVersion": 2,
-  "version": "0.1.0",
-  "assemblies": [ "StandingOrderJob.dll" ],
+  "version": "0.1.1",
+  "assemblies": [
+    "StandingOrderJob.dll"
+  ],
   "entry": "StandingOrderJob.StandingOrderJobMod",
   "gameVersion": ">=0.22.2 <0.23.0"
 }
