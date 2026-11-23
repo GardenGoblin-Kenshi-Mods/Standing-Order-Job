@@ -21,6 +21,11 @@ Screenshots live under `assets/screenshots/` in this mod repository (documentati
 
 ![Screenshot placeholder](assets/screenshots/placeholder_1080p.png)
 
+## Requirements
+
+- **[Meitou Client](https://github.com/MeitouEngine/MeitouClient)** (latest compatible build for `>=0.22.2 <0.23.0`)
+- Standalone: no additional external mod dependencies or Workshop downloads required.
+
 ## AI disclosure
 
 This mod is designed, architected, and reviewed by me, but much of the code is AI-generated. Documentation and supporting development tools also contain AI-generated content. <u>**This mod does not contain any AI generated art, models, prose, or audio.**</u>
