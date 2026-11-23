@@ -1,4 +1,4 @@
-# Implementation plan
+# Implementation notes
 
 ## Scope
 
@@ -31,7 +31,7 @@ The standing point is the clicked character's published snapshot position. Selec
 ```text
 mods/standing-order-job/
   README.md
-  docs/implementation-plan.md
+  docs/implementation-notes.md
   meitou.json
   src/
   tools/
