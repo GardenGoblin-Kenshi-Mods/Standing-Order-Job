@@ -11,7 +11,7 @@ The standing point is the clicked character's published snapshot position. Selec
 ## Runtime design
 
 1. Claim job type `1000` via `ModContext.AddJobType` as `"Stand Here"`.
-2. Register `StandHereSystem` after `StandardParts.Player`. The system implements `IDecisionOwner`, `IModSaveData`, and `IStateHashed`. `RegisterSources` calls `DecisionSystem.RegisterJob`.
+2. Register `StandHereSystem` after `StandardParts.Player`. The system implements `IChooserOwner`, `IModSaveData`, and `IStateHashed`. `Register` calls `ChooserRegistry.Jobs`.
 3. Register a character-menu verb. Its action queues `StandHereCommand` and reads `UiMenuContext.Shift` when activated. Animals-only selections drop the row in Meitou's menu filter; mixed selections still filter animals in Inputs.
 4. In the system's serial input phase, validate recipients and the point. For Shift, update-in-place or append a `PermaJob` of type `1000` (never `PermaJobs.Add`), store the point by lasting id from `GetOrGive` in Inputs only, and turn the jobs switch on. Without Shift, `world.Defer(new MoveOrder(...) { Tick = world.Tick + 1 })`.
 5. `IJobSource`: near the stored point return `DecisionCheck.Runs` (walk arrival leaves `Running.Task` as `GoTo` while hot task is `Idle`). Away from the point, `Start` walks with `TaskSource.Job` and `Job = k`. Missing point → `No`. Prune points and cancel ghost walks when the job is removed from the list.
