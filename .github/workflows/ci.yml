@@ -1,4 +1,3 @@
-
 name: ci
 
 on:
@@ -17,22 +16,49 @@ jobs:
           test -f src/StandingOrderJob.csproj
           test -x tools/package.sh
           test -x tools/stage.sh
+          test -x tools/archive-package.sh
           python3 -m json.tool meitou.json >/dev/null
 
-  # Optional Meitou build stays commented until MeitouClient is available in CI.
-  # Uncomment inside a Jinja raw block if adding GitHub Actions expressions.
+  package:
+    needs: layout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-  # build:
-  #   needs: layout
-  #   runs-on: ubuntu-latest
-  #   if: ${{ vars.MEITOU_CLIENT_AVAILABLE == 'true' }}
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-dotnet@v4
-  #       with:
-  #         dotnet-version: "11.0.x"
-  #     - run: ./tools/package.sh
-  #       env:
-  #         MEITOU_CLIENT_ROOT: ${{ vars.MEITOU_CLIENT_ROOT }}
+      - name: Resolve MeitouClient ref
+        id: meitou
+        run: |
+          ref="${{ vars.MEITOU_CLIENT_REF }}"
+          if [[ -z "$ref" && -f .github/meitou-client.ref ]]; then
+            ref="$(tr -d '[:space:]' < .github/meitou-client.ref)"
+          fi
+          if [[ -z "$ref" ]]; then
+            echo "::error::Set vars.MEITOU_CLIENT_REF or add .github/meitou-client.ref"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout MeitouClient
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.MEITOU_CLIENT_REPOSITORY || 'VlcekM/MeitouClient' }}
+          ref: ${{ steps.meitou.outputs.ref }}
+          path: .ci/MeitouClient
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "11.0.x"
+
+      - name: Package
+        env:
+          MEITOU_CLIENT_ROOT: ${{ github.workspace }}/.ci/MeitouClient
+        run: |
+          ./tools/package.sh
+          archive="$(./tools/archive-package.sh)"
+          echo "archive=$archive" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StandingOrderJob-package
+          path: ${{ env.archive }}
+          if-no-files-found: error

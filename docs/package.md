@@ -38,6 +38,8 @@ export KENSHI_PATH=/path/to/Kenshi
 
 Package folder `out/StandingOrderJob/` contains `StandingOrderJob.mod`, `meitou.json`, and `StandingOrderJob.dll`.
 
+`./tools/archive-package.sh` zips that folder to `out/StandingOrderJob-<version>.zip` for CI artifacts and GitHub Releases. CI checks out MeitouClient at `.github/meitou-client.ref` (override with Actions var `MEITOU_CLIENT_REF`).
+
 ## Debug
 
 Set `MEITOU_STANDING_ORDER_JOB_DEBUG=1` before launching Meitou. The mod writes transition lines to Meitou's `log.txt` prefixed with `mod       standing-order-job:` (command receipt, assign, walk/hold/stop, prune). It never posts player-facing diagnostic messages.
