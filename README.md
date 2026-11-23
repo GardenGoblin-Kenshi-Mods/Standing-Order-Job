@@ -1,6 +1,6 @@
 # Standing Order Job
 
-![Standing Order Job](assets/Standing Order Job_readme_banner.png)
+![Standing Order Job](assets/Standing_Order_Job_readme_banner.png)
 
 Independent Meitou mod repository, checked out in the Factory as `mods/standing-order-job` (`git@github.com:GardenGoblin-Kenshi-Mods/Standing-Order-Job.git`). Migrated from the Factory-local `mods/standing-order-job` tree.
 
