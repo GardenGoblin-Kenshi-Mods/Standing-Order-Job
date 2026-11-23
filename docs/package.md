@@ -38,7 +38,7 @@ export KENSHI_PATH=/path/to/Kenshi
 
 Package folder `out/StandingOrderJob/` contains `StandingOrderJob.mod`, `meitou.json`, and `StandingOrderJob.dll`.
 
-`./tools/archive-package.sh` zips that folder to `out/StandingOrderJob-<version>.zip` for CI artifacts and GitHub Releases. CI checks out MeitouClient at `.github/meitou-client.ref` (override with Actions var `MEITOU_CLIENT_REF`).
+`./tools/archive-package.sh` zips that folder to `out/StandingOrderJob-<version>.zip` for CI artifacts and GitHub Releases. CI checks out MeitouClient at `.github/meitou-client.ref` (override with Actions var `MEITOU_CLIENT_REF`). On GitHub Release, `package-checksums.sh` appends SHA-256 digests for `StandingOrderJob.dll` and `StandingOrderJob.mod` to the release notes.
 
 ## Debug
 

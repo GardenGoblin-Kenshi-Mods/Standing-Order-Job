@@ -68,9 +68,15 @@ jobs:
           archive="$(./tools/archive-package.sh)"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
-      - name: Upload release asset
+      - name: Upload release asset and checksum notes
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
-            "${{ steps.package.outputs.archive }}" --clobber
+          gh release upload "$TAG" "${{ steps.package.outputs.archive }}" --clobber
+          body="$(gh release view "$TAG" --json body -q .body)"
+          {
+            printf '%s\n\n' "$body"
+            ./tools/package-checksums.sh
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
