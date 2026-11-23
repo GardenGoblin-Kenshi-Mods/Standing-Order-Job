@@ -24,6 +24,5 @@ readme_features: |
   - Respects the Jobs toggle and can be removed from the normal Jobs panel.
   - Assigned positions survive save/load.
   - Job list order matters: an always-eligible `Stand Here` blocks later jobs below it (same class of behaviour as Bodyguard). Reassigning updates the job in place so it keeps its index.
-readme_requirements: |
-  - Standalone: no additional external mod dependencies or Workshop downloads required.
+readme_requirements: ''
 repo_url: https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job

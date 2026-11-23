@@ -24,7 +24,6 @@ Screenshots live under `assets/screenshots/` in this mod repository (documentati
 ## Requirements
 
 - **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (latest compatible build for `>=0.22.2 <0.23.0`)
-- Standalone: no additional external mod dependencies or Workshop downloads required.
 
 ## AI disclosure
 
