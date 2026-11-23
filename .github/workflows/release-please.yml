@@ -12,10 +12,65 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           # Optional override if GITHUB_TOKEN is restricted again.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  package-release:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Resolve MeitouClient ref
+        id: meitou
+        run: |
+          ref="${{ vars.MEITOU_CLIENT_REF }}"
+          if [[ -z "$ref" && -f .github/meitou-client.ref ]]; then
+            ref="$(tr -d '[:space:]' < .github/meitou-client.ref)"
+          fi
+          if [[ -z "$ref" ]]; then
+            echo "::error::Set vars.MEITOU_CLIENT_REF or add .github/meitou-client.ref"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout MeitouClient
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.MEITOU_CLIENT_REPOSITORY || 'VlcekM/MeitouClient' }}
+          ref: ${{ steps.meitou.outputs.ref }}
+          path: .ci/MeitouClient
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "11.0.x"
+
+      - name: Package
+        id: package
+        env:
+          MEITOU_CLIENT_ROOT: ${{ github.workspace }}/.ci/MeitouClient
+        run: |
+          ./tools/package.sh
+          archive="$(./tools/archive-package.sh)"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
+            "${{ steps.package.outputs.archive }}" --clobber

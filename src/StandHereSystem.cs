@@ -10,7 +10,7 @@ using Meitou.Simulation.Production;
 
 namespace StandingOrderJob;
 
-public sealed class StandHereSystem : ITickSystem, IDecisionOwner, IModSaveData, IStateHashed
+public sealed class StandHereSystem : ITickSystem, IChooserOwner, IModSaveData, IStateHashed
 {
     const int SaveFormat = 1;
 
@@ -26,7 +26,7 @@ public sealed class StandHereSystem : ITickSystem, IDecisionOwner, IModSaveData,
 
     internal Action<string> Log => _log;
 
-    public void RegisterSources(DecisionSystem decisions) => decisions.RegisterJob(StandHereTypes.Job, _jobs);
+    public void Register(ChooserRegistry chooser) => chooser.Jobs(StandHereTypes.Job, _jobs);
 
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
