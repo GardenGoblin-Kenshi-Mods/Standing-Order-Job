@@ -23,7 +23,7 @@ Screenshots live under `assets/screenshots/` in this mod repository (documentati
 
 ## Requirements
 
-- **[Meitou Client](https://github.com/MeitouEngine/MeitouClient)** (latest compatible build for `>=0.22.2 <0.23.0`)
+- **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (latest compatible build for `>=0.22.2 <0.23.0`)
 - Standalone: no additional external mod dependencies or Workshop downloads required.
 
 ## AI disclosure
@@ -38,4 +38,4 @@ For me, AI is also a tool that makes creative projects like this more accessible
 
 - `docs/package.md`: acceptance brief, package/stage instructions, and debug trace.
 - `docs/implementation-notes.md`: implementation and validation notes.
-- `AGENTS.md`: mod-local agent guidance complementary to the Factory skills.
+- `AGENTS.md`: mod-local agent guidance for AI coding assistants.

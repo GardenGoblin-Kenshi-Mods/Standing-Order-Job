@@ -17,7 +17,7 @@ Classification: Meitou C# code mod. FCS data cannot add a context-menu action, r
 
 ### Requirements & dependencies
 
-- **[Meitou Client](https://github.com/MeitouEngine/MeitouClient)**: Meitou code-mod API 2, compatible range pinned in `meitou.json` as `gameVersion` `>=0.22.2 <0.23.0`.
+- **[Meitou Client](https://github.com/VlcekM/MeitouClient)**: Meitou code-mod API 2, compatible range pinned in `meitou.json` as `gameVersion` `>=0.22.2 <0.23.0`.
 - Standalone: No Kenshi assets, Workshop downloads, companion mods, or RE_Kenshi DLLs are required.
 
 Job type number `1000` (`SimulationExtensions.FirstModCode`), named `Stand Here`.
