@@ -435,77 +435,125 @@ class ReleaseArtifactTests(unittest.TestCase):
 
 
 class NexusPreflightTests(unittest.TestCase):
+    def test_extract_web_mod_id_handles_v3_and_game_scoped_ids(self) -> None:
+        self.assertEqual(nexus_preflight.extract_web_mod_id("3161095932164"), "2308")
+        self.assertEqual(nexus_preflight.extract_web_mod_id("2308"), "2308")
+        self.assertEqual(nexus_preflight.extract_web_mod_id(""), "")
+
     def test_available_version_passes(self) -> None:
-        payload = {"files": [{"file_id": 100, "version": "0.1.0", "category_name": "MAIN"}]}
+        payload = {
+            "data": {
+                "versions": [
+                    {"id": "3161095935001", "game_scoped_id": "6847", "version": "0.1.0", "category": "main"}
+                ]
+            }
+        }
+        seen_args: list[tuple[str, str]] = []
+
+        def fake_fetcher(file_id: str, api_key: str) -> dict:
+            seen_args.append((file_id, api_key))
+            return payload
+
         rc, outputs, msg = nexus_preflight.run_preflight(
             game_domain="kenshi",
-            mod_id="2308",
+            file_id="6847",
             target_version="0.1.1",
-            api_key="secret",
+            api_key="  secret-key\n",
             dry_run=False,
-            fetcher=lambda _g, _m, _k: payload,
+            mod_id="3161095932164",
+            fetcher=fake_fetcher,
         )
         self.assertEqual(rc, 0)
+        self.assertEqual(seen_args, [("6847", "secret-key")])
         self.assertEqual(outputs["preflight_status"], "available")
+        self.assertEqual(outputs["web_mod_id"], "2308")
         self.assertIn("v0.1.1", msg)
 
     def test_duplicate_version_blocks_live_and_reports_in_dry_run(self) -> None:
         payload = {
-            "files": [
-                {"file_id": 100, "version": "0.1.0", "category_name": "OLD_VERSION"},
-                {"file_id": 205, "version": "v0.1.1", "category_name": "ARCHIVED"},
-            ]
+            "data": {
+                "versions": [
+                    {"id": "3161095935001", "game_scoped_id": "6847", "version": "0.1.0", "category": "old_version"},
+                    {"id": "3161095935002", "game_scoped_id": "6890", "version": "v0.1.1", "category": "archived"},
+                ]
+            }
         }
         rc_live, out_live, msg_live = nexus_preflight.run_preflight(
             game_domain="kenshi",
-            mod_id="2308",
+            file_id="6847",
             target_version="0.1.1",
             api_key="secret",
             dry_run=False,
-            fetcher=lambda _g, _m, _k: payload,
+            mod_id="3161095932164",
+            fetcher=lambda _f, _k: payload,
         )
         self.assertEqual(rc_live, 1)
         self.assertEqual(out_live["preflight_status"], "blocked_duplicate")
-        self.assertEqual(out_live["existing_file_id"], "205")
-        self.assertIn("Nexus publish blocked: version v0.1.1 already exists for this mod", msg_live)
+        self.assertEqual(out_live["existing_version_id"], "3161095935002")
+        self.assertEqual(out_live["existing_file_id"], "6847")
+        self.assertEqual(out_live["web_mod_id"], "2308")
+        self.assertIn("https://www.nexusmods.com/kenshi/mods/2308?tab=files&file_id=6890", out_live["existing_file_url"])
+        self.assertIn("Nexus publish blocked: version v0.1.1 already exists for mod file 6847", msg_live)
         self.assertIn("no upload attempted", msg_live)
 
         rc_dry, out_dry, _msg_dry = nexus_preflight.run_preflight(
             game_domain="kenshi",
-            mod_id="2308",
+            file_id="6847",
             target_version="0.1.1",
             api_key="secret",
             dry_run=True,
-            fetcher=lambda _g, _m, _k: payload,
+            mod_id="3161095932164",
+            fetcher=lambda _f, _k: payload,
         )
         self.assertEqual(rc_dry, 0)
         self.assertEqual(out_dry["preflight_status"], "blocked_duplicate")
 
     def test_api_or_ambiguous_data_fails_closed(self) -> None:
-        def failing_fetcher(_g: str, _m: str, _k: str) -> dict:
+        def failing_fetcher(_f: str, _k: str) -> dict:
             raise RuntimeError("Nexus API HTTP error 503: Service Unavailable")
 
         rc_err, out_err, _ = nexus_preflight.run_preflight(
-            "kenshi", "2308", "0.1.2", "secret", False, fetcher=failing_fetcher
+            "kenshi", "6847", "0.1.2", "secret", False, fetcher=failing_fetcher
         )
         self.assertEqual(rc_err, 1)
         self.assertEqual(out_err["preflight_status"], "error")
 
-        # Missing 'files' list
+        # Missing 'data' object
+        rc_no_data, _, _ = nexus_preflight.run_preflight(
+            "kenshi", "6847", "0.1.2", "secret", False, fetcher=lambda _f, _k: {"unexpected": []}
+        )
+        self.assertEqual(rc_no_data, 1)
+
+        # Missing 'data.versions' list
         rc_bad, _, _ = nexus_preflight.run_preflight(
-            "kenshi", "2308", "0.1.2", "secret", False, fetcher=lambda _g, _m, _k: {"unexpected": []}
+            "kenshi", "6847", "0.1.2", "secret", False, fetcher=lambda _f, _k: {"data": {"unexpected": []}}
         )
         self.assertEqual(rc_bad, 1)
 
-        # Pagination indicator fails closed
+        # Pagination indicator fails closed (both root and data level)
         rc_page, _, _ = nexus_preflight.run_preflight(
-            "kenshi", "2308", "0.1.2", "secret", False, fetcher=lambda _g, _m, _k: {"files": [], "has_more": True}
+            "kenshi",
+            "6847",
+            "0.1.2",
+            "secret",
+            False,
+            fetcher=lambda _f, _k: {"data": {"versions": [], "has_more": True}},
         )
         self.assertEqual(rc_page, 1)
 
+        rc_page_root, _, _ = nexus_preflight.run_preflight(
+            "kenshi",
+            "6847",
+            "0.1.2",
+            "secret",
+            False,
+            fetcher=lambda _f, _k: {"data": {"versions": []}, "next_cursor": "abc"},
+        )
+        self.assertEqual(rc_page_root, 1)
+
         # Missing version string in entry fails closed
         rc_null, _, _ = nexus_preflight.run_preflight(
-            "kenshi", "2308", "0.1.2", "secret", False, fetcher=lambda _g, _m, _k: {"files": [{"file_id": 1}]}
+            "kenshi", "6847", "0.1.2", "secret", False, fetcher=lambda _f, _k: {"data": {"versions": [{"id": "1"}]}}
         )
         self.assertEqual(rc_null, 1)
 
@@ -517,6 +565,47 @@ class NexusPreflightTests(unittest.TestCase):
         rc_live, out_live, _ = nexus_preflight.run_preflight("kenshi", "", "0.1.2", "", dry_run=False)
         self.assertEqual(rc_live, 1)
         self.assertEqual(out_live["preflight_status"], "error")
+
+    def test_v3_fetch_uses_v3_url_stripped_apikey_and_never_logs_error_body(self) -> None:
+        import urllib.error
+
+        captured_req = {}
+
+        class _FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"data":{"versions":[]}}'
+
+        def fake_urlopen(req, timeout=0):
+            captured_req["url"] = req.full_url
+            captured_req["headers"] = {k.lower(): v for k, v in req.header_items()}
+            return _FakeResponse()
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            res = nexus_preflight.fetch_mod_file_versions_json("6847", "  my-secret-token \n")
+        self.assertEqual(res, {"data": {"versions": []}})
+        self.assertEqual(captured_req["url"], "https://api.nexusmods.com/v3/mod-files/6847/versions")
+        self.assertEqual(captured_req["headers"]["apikey"], "my-secret-token")
+
+        err = urllib.error.HTTPError(
+            url="https://api.nexusmods.com/v3/mod-files/6847/versions",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=io.BytesIO(b'{"detail":"DO_NOT_LEAK_SENSITIVE_BODY"}'),
+        )
+        with mock.patch("urllib.request.urlopen", side_effect=err):
+            with self.assertRaises(RuntimeError) as ctx:
+                nexus_preflight.fetch_mod_file_versions_json("6847", "my-secret-token")
+        self.assertEqual(str(ctx.exception), "Nexus API HTTP error 401: Unauthorized")
+        self.assertNotIn("DO_NOT_LEAK_SENSITIVE_BODY", str(ctx.exception))
 
 
 if __name__ == "__main__":

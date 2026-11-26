@@ -161,11 +161,13 @@ jobs:
         env:
           DRY_RUN: ${{ inputs.dry_run }}
           NEXUS_MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          NEXUS_FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
           NEXUSMODS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
           TARGET_VERSION: ${{ steps.verify.outputs.version }}
         run: |
           args=(
             --game-domain kenshi
+            --file-id "$NEXUS_FILE_ID"
             --mod-id "$NEXUS_MOD_ID"
             --target-version "$TARGET_VERSION"
           )
@@ -220,6 +222,7 @@ jobs:
           CATEGORY: ${{ inputs.category || 'main' }}
           MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
           FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+          WEB_MOD_ID: ${{ steps.preflight.outputs.web_mod_id }}
           PREFLIGHT_STATUS: ${{ steps.preflight.outputs.preflight_status }}
           PREFLIGHT_DETAIL: ${{ steps.preflight.outputs.preflight_detail }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
@@ -249,8 +252,16 @@ jobs:
             if [[ -n "$UPLOAD_VERSION_ID" ]]; then
               echo "| Uploaded Nexus version ID | \`$UPLOAD_VERSION_ID\` |"
             fi
-            if [[ -n "$MOD_ID" ]]; then
-              echo "| Nexus page | https://www.nexusmods.com/kenshi/mods/$MOD_ID?tab=files |"
+            web_mod_id="$WEB_MOD_ID"
+            if [[ -z "$web_mod_id" && "$MOD_ID" =~ ^[0-9]+$ ]]; then
+              if (( MOD_ID >= 4294967296 )); then
+                web_mod_id=$(( MOD_ID & 4294967295 ))
+              else
+                web_mod_id="$MOD_ID"
+              fi
+            fi
+            if [[ -n "$web_mod_id" ]]; then
+              echo "| Nexus page | https://www.nexusmods.com/kenshi/mods/$web_mod_id?tab=files |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

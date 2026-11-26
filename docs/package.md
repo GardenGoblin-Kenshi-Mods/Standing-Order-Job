@@ -49,10 +49,10 @@ export KENSHI_PATH=/path/to/Kenshi
 
 Nexus Mods v3 file uploads update an existing file chain on an already-created mod page, so create the mod page and upload the initial file once on Nexus Mods first, then configure:
 
-- **Repository secret:** `NEXUSMODS_API_KEY` (personal API key from Nexus Mods *Site preferences → API keys*).
-- **GitHub Actions environment (`nexus_deploy`) variables:** `NEXUSMODS_MOD_ID` (numeric mod ID from the Nexus mod URL) and `NEXUSMODS_FILE_ID` (file ID from the Nexus *Files → Advanced* / *Manage Files* view).
+- **Repository secret:** `NEXUSMODS_API_KEY` (personal API key from Nexus Mods *Settings → API Keys*, `https://www.nexusmods.com/settings/api-keys`).
+- **GitHub Actions environment (`nexus_deploy`) variables:** `NEXUSMODS_MOD_ID` (v3 Mod ID from the Nexus *Files → Advanced* / *Manage Files → ⋮ → Advanced* view) and `NEXUSMODS_FILE_ID` (v3 File ID from the same *Advanced* view).
 
-**Duplicate-version preflight:** Before any live Nexus upload, `.github/scripts/nexus_preflight.py` queries `GET /v1/games/kenshi/mods/<NEXUSMODS_MOD_ID>/files.json` and fails closed (nonzero exit, zero upload attempted) if the target version already exists on the mod or if the API cannot be checked reliably. Dry runs report the preflight result when credentials are configured, or clearly note that credentialed API preflight was skipped.
+**Duplicate-version preflight:** Before any live Nexus upload, `.github/scripts/nexus_preflight.py` queries Nexus Mods v3 `GET /v3/mod-files/<NEXUSMODS_FILE_ID>/versions` (using the same `apikey` header as `Nexus-Mods/upload-action`) and fails closed (nonzero exit, zero upload attempted, never logging HTTP error bodies) if the target version already exists on the mod file or if the API cannot be checked reliably. Dry runs report the preflight result when credentials are configured, or clearly note that credentialed API preflight was skipped.
 
 ```bash
 # Safe dry-run against the latest published GitHub Release
