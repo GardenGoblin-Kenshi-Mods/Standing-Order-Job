@@ -1,0 +1,63 @@
+## Description
+
+{{ description | trim }}
+{%- if repo_url | trim %}
+
+**GitHub repository (source code, issue tracker, and full docs):** [{{ mod_name }} on GitHub]({{ (repo_url | trim).rstrip('/') }})
+{%- endif %}
+
+This is a **[Meitou Client](https://github.com/VlcekM/MeitouClient)** C# code mod for Kenshi (it does not run on vanilla Kenshi or RE_Kenshi).
+
+## Installation instructions
+
+### Mod Manager (Vortex / MO2 / Amethyst)
+
+1. Click **Mod Manager Download** on the **Files** tab (or import the downloaded `{{ assembly_name }}-<version>.zip` archive into your mod manager).
+2. Install and enable the mod so the `{{ assembly_name }}/` folder (containing `{{ assembly_name }}.mod`, `meitou.json`, and `{{ assembly_name }}.dll`) is deployed into your Kenshi `mods/` directory.
+3. Open **Meitou Launcher**, enable `{{ assembly_name }}.mod` in your load order, and launch **Meitou Client**.
+
+### Manual installation
+
+1. Download the latest archive from the **Files** tab on Nexus Mods.
+2. Extract `{{ assembly_name }}-<version>.zip` into your Kenshi `mods/` directory so the final path is `<Kenshi>/mods/{{ assembly_name }}/{{ assembly_name }}.mod` (alongside `meitou.json` and `{{ assembly_name }}.dll`).
+3. Enable `{{ assembly_name }}.mod` in **Meitou Launcher** (or add `{{ assembly_name }}.mod` to `<Kenshi>/data/mods.cfg`) and launch **Meitou Client**.
+
+### Uninstalling
+
+Disable `{{ assembly_name }}.mod` in **Meitou Launcher** and remove the `{{ assembly_name }}/` folder from `<Kenshi>/mods/`.
+
+## Main features
+
+{{ readme_features | trim }}
+
+## Requirements
+
+- **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (latest compatible build for `{{ game_version }}`) — **required**. This mod uses the Meitou Client C# modding API and will not load in vanilla Kenshi or via RE_Kenshi.
+{%- if repo_url | trim %}
+
+## Security & build verification
+
+Meitou code mods run compiled C# inside the game process; third-party code mods are inherently potentially unsafe. Every Nexus Mods upload is the exact same ZIP built by GitHub Actions from the tagged source commit, with SHA-256 manifests, MSBuild binary logs, embedded portable PDBs/sources, and GitHub build-provenance attestations for both the ZIP and extracted DLL — see [Build Transparency & Verification]({{ (repo_url | trim).rstrip('/') }}#build-transparency--verification) and the release changelog links for verification commands and limitations.
+{%- endif %}
+{%- if readme_requirements | trim %}
+{%- if (readme_requirements | trim).startswith('#') %}
+
+{% endif %}
+{{ readme_requirements | trim }}
+{%- endif %}
+
+## Shout outs
+
+- **Lo-Fi Games** for creating Kenshi.
+- **Martin Vlček (`VlcekM`)** and the **[Meitou Client](https://github.com/VlcekM/MeitouClient)** contributors for building Meitou Client and its C# modding API.
+{%- if nexus_shout_outs | default('') | trim %}
+{{ nexus_shout_outs | trim }}
+{%- endif %}
+
+## AI disclosure
+
+This mod is designed, architected, and reviewed by me, but much of the code is AI-generated. Documentation and supporting development tools also contain AI-generated content. **This mod does not contain any AI generated art, models, prose, or audio.**{% if repo_url | trim %} [Read the full AI disclosure on GitHub]({{ (repo_url | trim).rstrip('/') }}#ai-disclosure).{% endif %}
+
+## License
+
+This mod is licensed under the GNU General Public License v3.0 (GPLv3).{% if repo_url | trim %} Full source code and license text are available on [GitHub]({{ (repo_url | trim).rstrip('/') }}).{% endif %}

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MeitouClientRoot)/src/Meitou.Core/Meitou.Core.csproj" />
+    <ProjectReference Include="$(MeitouClientRoot)/src/Meitou.Data/Meitou.Data.csproj" />
+  </ItemGroup>
+
+  <Target Name="RequireMeitouClientRoot" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(MeitouClientRoot)' == ''"
+           Text="Set MeitouClientRoot to the MeitouClient checkout before packaging this mod." />
+  </Target>
+</Project>

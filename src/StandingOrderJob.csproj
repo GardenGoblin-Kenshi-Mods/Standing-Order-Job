@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>StandingOrderJob</RootNamespace>
+    <AssemblyName>StandingOrderJob</AssemblyName>
+    <Version Condition="'$(Version)' == ''">$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/../version.txt').Trim())</Version>
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+    <Deterministic>true</Deterministic>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>embedded</DebugType>
+    <EmbedAllSources>true</EmbedAllSources>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job</RepositoryUrl>
+    <PrivateRepositoryUrl Condition="'$(PrivateRepositoryUrl)' == ''">$(RepositoryUrl)</PrivateRepositoryUrl>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true' or '$(DeterministicBuild)' == 'true'">true</ContinuousIntegrationBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors Condition="'$(CI)' == 'true'">true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(EnableSourceControlManagerQueries)' == 'false' and '$(SourceRevisionId)' != ''">
+    <SourceRoot Include="$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..'))"
+                SourceControl="git"
+                RepositoryUrl="$(RepositoryUrl)"
+                RevisionId="$(SourceRevisionId)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="StandingOrderJob.Tests" />
+    <ProjectReference Include="$(MeitouClientRoot)/src/Meitou.Game/Meitou.Game.csproj" Private="false" />
+  </ItemGroup>
+
+  <Target Name="RequireMeitouClientRoot" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(MeitouClientRoot)' == ''"
+           Text="Set MeitouClientRoot to the MeitouClient checkout before building this mod." />
+  </Target>
+</Project>

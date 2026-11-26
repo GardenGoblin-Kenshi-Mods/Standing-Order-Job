@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check scaffold files
+        run: |
+          test -f meitou.json
+          test -f src/StandingOrderJob.csproj
+          test -f flake.nix
+          test -f flake.lock
+          test -f nix/deps.json
+          test -x tools/package.sh
+          test -x tools/stage.sh
+          test -x tools/archive-package.sh
+          test -x tools/package-checksums.sh
+          test -x tools/check-binlog-secrets.sh
+          test -x tools/verify-reproducibility.sh
+          test -x tools/update-nix-deps.sh
+          test -x tools/steam-login.sh
+          test -x .github/scripts/steam-ci.sh
+          bash -n tools/steam-login.sh .github/scripts/steam-ci.sh
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+          python3 -m json.tool meitou.json >/dev/null
+          python3 -m json.tool nix/deps.json >/dev/null
+          if [[ -f .github/mod-dependencies.json ]]; then
+            python3 -m json.tool .github/mod-dependencies.json >/dev/null
+          fi
+
+  package:
+    needs: layout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = true
+
+      - name: Package (sandboxed Nix build)
+        run: |
+          ./tools/package.sh
+          ./tools/check-binlog-secrets.sh out/StandingOrderJob.binlog
+          ./tools/verify-reproducibility.sh
+          version="$(tr -d '[:space:]' < version.txt)"
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StandingOrderJob-package
+          path: |
+            out/StandingOrderJob-${{ env.version }}.zip
+            out/StandingOrderJob-${{ env.version }}.contents.sha256
+            out/StandingOrderJob-${{ env.version }}.zip.sha256
+            out/StandingOrderJob.binlog
+          if-no-files-found: error

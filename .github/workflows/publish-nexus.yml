@@ -1,0 +1,259 @@
+name: publish-nexus
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag to publish (e.g. v0.1.0). Must exactly match an existing repository tag and published release."
+        required: true
+        type: string
+      dry_run:
+        description: "Validate release archive, checksums, metadata, and Nexus config without uploading"
+        required: false
+        type: boolean
+        default: false
+      category:
+        description: "Nexus Mods file category"
+        required: false
+        type: string
+        default: main
+      archive_existing_version:
+        description: "Archive the previous file version on Nexus Mods"
+        required: false
+        type: boolean
+        default: true
+      update_mod_version:
+        description: "Update the main mod page version on Nexus Mods"
+        required: false
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag to publish (e.g. v0.1.0). Must exactly match an existing repository tag and published release. Use 'latest' for the latest published release."
+        required: false
+        type: string
+        default: "latest"
+      dry_run:
+        description: "Validate release archive, checksums, metadata, and Nexus config without uploading"
+        required: false
+        type: boolean
+        default: true
+      category:
+        description: "Nexus Mods file category"
+        required: false
+        type: choice
+        default: main
+        options:
+          - main
+          - optional
+          - miscellaneous
+      archive_existing_version:
+        description: "Archive the previous file version on Nexus Mods"
+        required: false
+        type: boolean
+        default: true
+      update_mod_version:
+        description: "Update the main mod page version on Nexus Mods"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-nexus-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish-nexus:
+    runs-on: ubuntu-latest
+    environment: nexus_deploy
+    steps:
+      - name: Checkout repository (full tag history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all repository tags and prepare work root
+        run: |
+          git fetch --tags --force --quiet
+          echo "NEXUS_WORK_ROOT=$RUNNER_TEMP/standing-order-job-nexus" >> "$GITHUB_ENV"
+
+      - name: Resolve GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p "$NEXUS_WORK_ROOT/release-assets"
+          python3 .github/scripts/release_artifact.py resolve \
+            --repo "$REPO" \
+            --release-tag "$INPUT_RELEASE_TAG" \
+            --git-dir . \
+            --release-json-out "$NEXUS_WORK_ROOT/release-assets/release.json" \
+            --changelog-out "$NEXUS_WORK_ROOT/release-assets/changelog.txt"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          ZIP_NAME: ${{ steps.release.outputs.zip_name }}
+          ZIP_SHA_NAME: ${{ steps.release.outputs.zip_sha_name }}
+        run: |
+          assets_dir="$NEXUS_WORK_ROOT/release-assets"
+          gh release download "$TAG" --repo "$REPO" --pattern "$ZIP_NAME" --dir "$assets_dir" --clobber
+          gh release download "$TAG" --repo "$REPO" --pattern "$ZIP_SHA_NAME" --dir "$assets_dir" --clobber
+          for required in "$ZIP_NAME" "$ZIP_SHA_NAME"; do
+            if [[ ! -f "$assets_dir/$required" ]]; then
+              echo "::error::Missing required downloaded release asset: $required"
+              exit 1
+            fi
+          done
+          echo "Downloaded release assets for $TAG into $assets_dir"
+
+      - name: Verify ZIP SHA-256
+        id: verify
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+          ZIP_NAME: ${{ steps.release.outputs.zip_name }}
+          ZIP_SHA_NAME: ${{ steps.release.outputs.zip_sha_name }}
+        run: |
+          assets_dir="$NEXUS_WORK_ROOT/release-assets"
+          python3 .github/scripts/release_artifact.py verify-zip \
+            --zip "$assets_dir/$ZIP_NAME" \
+            --zip-sha "$assets_dir/$ZIP_SHA_NAME" \
+            --expected-tag "$TAG"
+
+      - name: Validate Nexus Mods configuration
+        id: config
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          NEXUS_MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          NEXUS_FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+          HAS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY != '' }}
+        run: |
+          missing=()
+          [[ -z "$NEXUS_MOD_ID" ]] && missing+=("vars.NEXUSMODS_MOD_ID")
+          [[ -z "$NEXUS_FILE_ID" ]] && missing+=("vars.NEXUSMODS_FILE_ID")
+          [[ "$HAS_API_KEY" != "true" ]] && missing+=("secrets.NEXUSMODS_API_KEY")
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "::notice::Dry run enabled; skipping Nexus Mods upload."
+            if (( ${#missing[@]} > 0 )); then
+              echo "::warning::Missing Nexus Mods config (required for live upload): ${missing[*]}"
+            else
+              echo "::notice::All Nexus Mods config values are present (mod_id=$NEXUS_MOD_ID, file_id=$NEXUS_FILE_ID)."
+            fi
+            exit 0
+          fi
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required Nexus Mods configuration: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Preflight check — Nexus version availability
+        id: preflight
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          NEXUS_MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          NEXUSMODS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          TARGET_VERSION: ${{ steps.verify.outputs.version }}
+        run: |
+          args=(
+            --game-domain kenshi
+            --mod-id "$NEXUS_MOD_ID"
+            --target-version "$TARGET_VERSION"
+          )
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python3 .github/scripts/nexus_preflight.py "${args[@]}"
+
+      - name: Log verified artifact before Nexus upload
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        env:
+          ZIP_PATH: ${{ steps.verify.outputs.zip_path }}
+          ZIP_SHA256: ${{ steps.verify.outputs.zip_sha256 }}
+          MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+          VERSION: ${{ steps.verify.outputs.version }}
+        run: |
+          echo "Uploading verified artifact: $ZIP_PATH (SHA-256: $ZIP_SHA256)"
+          echo "Destination: Nexus Mods (mod_id=$MOD_ID, file_id=$FILE_ID, version=$VERSION)"
+
+      - name: Upload verified ZIP
+        id: upload
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.11
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          mod_id: ${{ vars.NEXUSMODS_MOD_ID }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID }}
+          filename: ${{ steps.verify.outputs.zip_path }}
+          version: ${{ steps.verify.outputs.version }}
+          display_name: ${{ steps.verify.outputs.display_name }}
+          description: ${{ steps.verify.outputs.description }}
+          category: ${{ inputs.category || 'main' }}
+          changelog: ${{ steps.release.outputs.changelog }}
+          archive_existing_version: ${{ inputs.archive_existing_version }}
+          update_mod_version: ${{ inputs.update_mod_version }}
+          primary_mod_manager_download: ${{ (inputs.category || 'main') == 'main' }}
+          allow_mod_manager_download: true
+
+      - name: Write publish summary
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          JOB_STATUS: ${{ job.status }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          COMMIT_SHA: ${{ steps.release.outputs.commit_sha }}
+          ZIP_NAME: ${{ steps.verify.outputs.zip_name }}
+          ZIP_SHA256: ${{ steps.verify.outputs.zip_sha256 }}
+          VERSION: ${{ steps.verify.outputs.version }}
+          GAME_VERSION: ${{ steps.verify.outputs.game_version }}
+          CATEGORY: ${{ inputs.category || 'main' }}
+          MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+          PREFLIGHT_STATUS: ${{ steps.preflight.outputs.preflight_status }}
+          PREFLIGHT_DETAIL: ${{ steps.preflight.outputs.preflight_detail }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          UPLOAD_VERSION_ID: ${{ steps.upload.outputs.version_id }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            outcome="dry-run (no upload attempted)"
+          elif [[ "$UPLOAD_OUTCOME" == "success" ]]; then
+            outcome="uploaded"
+          else
+            outcome="failed (no upload occurred or upload failed)"
+          fi
+          {
+            echo "### Nexus Mods Publish Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Outcome | \`$outcome\` (job: \`$JOB_STATUS\`) |"
+            echo "| Release tag | \`${TAG:-<unresolved>}\` |"
+            echo "| GitHub Release | ${RELEASE_URL:-<unresolved>} |"
+            echo "| Source commit | \`${COMMIT_SHA:-<unknown>}\` |"
+            echo "| Verified ZIP | \`${ZIP_NAME:-<unverified>}\` |"
+            echo "| ZIP SHA-256 | \`${ZIP_SHA256:-<unverified>}\` |"
+            echo "| Version | \`${VERSION:-<unverified>}\` (Meitou \`${GAME_VERSION:-<unknown>}\`) |"
+            echo "| Nexus target | mod \`${MOD_ID:-<unset>}\`, file \`${FILE_ID:-<unset>}\`, category \`$CATEGORY\` |"
+            echo "| Duplicate-version preflight | \`${PREFLIGHT_STATUS:-not-run}\` — ${PREFLIGHT_DETAIL:-not run} |"
+            if [[ -n "$UPLOAD_VERSION_ID" ]]; then
+              echo "| Uploaded Nexus version ID | \`$UPLOAD_VERSION_ID\` |"
+            fi
+            if [[ -n "$MOD_ID" ]]; then
+              echo "| Nexus page | https://www.nexusmods.com/kenshi/mods/$MOD_ID?tab=files |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up temporary release assets
+        if: always()
+        run: rm -rf "${NEXUS_WORK_ROOT:-$RUNNER_TEMP/standing-order-job-nexus}"

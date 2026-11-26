@@ -1,0 +1,73 @@
+name: validate-steam-session
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steam-session-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validate-steam-session:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check required Steam secrets
+        env:
+          HAS_USERNAME: ${{ secrets.STEAM_USERNAME != '' }}
+          HAS_CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF != '' }}
+        run: |
+          missing=()
+          [[ "$HAS_USERNAME" != "true" ]] && missing+=("secrets.STEAM_USERNAME")
+          [[ "$HAS_CONFIG_VDF" != "true" ]] && missing+=("secrets.STEAM_CONFIG_VDF")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required Steam publishing secret(s): ${missing[*]}"
+            exit 1
+          fi
+          echo "Required Steam secrets are configured (values not printed)."
+
+      - name: Install SteamCMD
+        run: .github/scripts/steam-ci.sh install
+
+      - name: Restore SteamCMD session
+        env:
+          STEAM_CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF }}
+        run: .github/scripts/steam-ci.sh restore-session
+
+      - name: Authenticate SteamCMD (non-interactive)
+        id: auth
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+        run: .github/scripts/steam-ci.sh auth-check
+
+      - name: Write sanitized validation summary
+        if: always()
+        env:
+          AUTH_STATUS: ${{ steps.auth.outputs.auth_status }}
+          AUTH_DETAIL: ${{ steps.auth.outputs.auth_detail }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          RUNNER_OS_NAME: ${{ runner.os }}
+          RUNNER_ARCH_NAME: ${{ runner.arch }}
+        run: |
+          {
+            echo "### Validate SteamCMD Session"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Outcome | \`${AUTH_STATUS:-fail}\` (job: \`${JOB_STATUS}\`) |"
+            echo "| Detail | ${AUTH_DETAIL:-Validation stopped before authentication completed.} |"
+            echo "| Runner | \`${RUNNER_OS_NAME}/${RUNNER_ARCH_NAME}\` |"
+            echo "| Run ID | \`${RUN_ID}\` |"
+            echo ""
+            echo "> Note: Authentication success validates non-interactive SteamCMD login on this runner only. It does not by itself verify Kenshi Workshop upload authorization or indefinite session lifetime."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up SteamCMD session
+        if: always()
+        run: .github/scripts/steam-ci.sh cleanup

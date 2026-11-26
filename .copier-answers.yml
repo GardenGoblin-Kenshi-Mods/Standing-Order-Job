@@ -1,0 +1,54 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.3.1
+_src_path: gh:GardenGoblin-Kenshi-Mods/mod-template
+api_version: 3
+assembly_name: StandingOrderJob
+author: Garden Goblin
+description: 'Pin squadmates to a spot and keep them there. Hold right-click a player
+    character and choose Stand Here for a one-shot move, or hold Shift to assign a
+    permanent Stand Here job — the same context-menu convention Kenshi already uses
+    for other jobs.
+
+    '
+game_version: '>=0.23.0 <0.24.0'
+include_agents_md: true
+include_ci: true
+include_release_please: true
+license_spdx: GPL-3.0
+mod_name: Standing Order Job
+mod_slug: standing-order-job
+nexus_url: https://www.nexusmods.com/kenshi/mods/2308
+readme_extra_docs: '- `docs/implementation-notes.md`: design decisions and runtime
+    invariants.
+
+    '
+readme_features: '- Adds `Stand Here` to a player character''s hold-right-click menu
+    when they are selected and non-animal.
+
+    - Unshifted `Stand Here` orders eligible selected characters to the clicked character''s
+    position once without altering existing jobs.
+
+    - Shift+`Stand Here` adds or updates a permanent `Stand Here` job in-place (preserving
+    job-list priority) with one standing coordinate per character.
+
+    - Characters walk to their assigned point and hold within `1.5m` horizontal distance
+    until a higher-priority task or player order interrupts them.
+
+    - Combat, incapacity, carrying, and other standard interruptions use normal task
+    precedence; eligible characters resume standing afterward (an active in-range `Stand
+    Here` blocks lower jobs below it).
+
+    - Configurable maximum return distance in **Mods → Standing Order Job** (defaults
+    to `652m` to match Meitou''s vanilla job range; set `0` for unlimited); out-of-range
+    characters skip `Stand Here` without disabling `Jobs` or erasing their saved spot
+    and resume automatically once back in range.
+
+    - Respects the Jobs toggle, cleans up automatically when removed from the Jobs
+    panel, and preserves assigned positions across zone unloads and save/load.
+
+    '
+readme_requirements: ''
+readme_screenshots: |
+  ![Hold right-click menu on a selected squadmate showing Stand Here, with the assigned Stand Here job in the Jobs panel](assets/screenshots/standing_order_context_menu.png)
+repo_url: https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job
+steam_url: ''

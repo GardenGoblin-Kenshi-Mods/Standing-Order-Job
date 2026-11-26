@@ -1,0 +1,269 @@
+name: publish-steam
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag to publish (e.g. v0.1.0). Must exactly match an existing repository tag and published release."
+        required: true
+        type: string
+      dry_run:
+        description: "Validate release archive, checksums, extracted files, and Workshop VDF without authenticating or uploading"
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag to publish (e.g. v0.1.0). Must exactly match an existing repository tag and published release. Use 'latest' for the latest published release."
+        required: false
+        type: string
+        default: "latest"
+      dry_run:
+        description: "Validate release archive, checksums, extracted files, and Workshop VDF without authenticating or uploading"
+        required: false
+        type: boolean
+        default: true
+      update_preview:
+        description: "Intentionally update the primary Workshop thumbnail (omitted by default to preserve curated media)"
+        required: false
+        type: boolean
+        default: false
+      preview_file:
+        description: "Repository-relative path to primary preview image (PNG/JPEG/GIF, <=1 MiB), used only when update_preview is true"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-steam-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish-steam:
+    runs-on: ubuntu-latest
+    environment: steam_deploy
+    steps:
+      - name: Checkout repository (full tag history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all repository tags and prepare work root
+        run: |
+          git fetch --tags --force --quiet
+          work_root="$RUNNER_TEMP/standing-order-job-steam"
+          echo "STEAM_WORK_ROOT=$work_root" >> "$GITHUB_ENV"
+          echo "STEAM_CI_WORK_ROOT=$work_root" >> "$GITHUB_ENV"
+
+      - name: Resolve GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p "$STEAM_WORK_ROOT/release-assets" "$STEAM_WORK_ROOT/workshop-staging"
+          python3 .github/scripts/release_artifact.py resolve \
+            --repo "$REPO" \
+            --release-tag "$INPUT_RELEASE_TAG" \
+            --git-dir . \
+            --require-contents-sha \
+            --release-json-out "$STEAM_WORK_ROOT/release-assets/release.json" \
+            --changelog-out "$STEAM_WORK_ROOT/release-assets/changelog.txt"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          ZIP_NAME: ${{ steps.release.outputs.zip_name }}
+          ZIP_SHA_NAME: ${{ steps.release.outputs.zip_sha_name }}
+          CONTENTS_SHA_NAME: ${{ steps.release.outputs.contents_sha_name }}
+        run: |
+          assets_dir="$STEAM_WORK_ROOT/release-assets"
+          gh release download "$TAG" --repo "$REPO" --pattern "$ZIP_NAME" --dir "$assets_dir" --clobber
+          gh release download "$TAG" --repo "$REPO" --pattern "$ZIP_SHA_NAME" --dir "$assets_dir" --clobber
+          gh release download "$TAG" --repo "$REPO" --pattern "$CONTENTS_SHA_NAME" --dir "$assets_dir" --clobber
+          for required in "$ZIP_NAME" "$ZIP_SHA_NAME" "$CONTENTS_SHA_NAME"; do
+            if [[ ! -f "$assets_dir/$required" ]]; then
+              echo "::error::Missing required downloaded release asset: $required"
+              exit 1
+            fi
+          done
+          echo "Downloaded release assets for $TAG into $assets_dir"
+
+      - name: Verify ZIP SHA-256 and archive structure
+        id: verify
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+          ZIP_NAME: ${{ steps.release.outputs.zip_name }}
+          ZIP_SHA_NAME: ${{ steps.release.outputs.zip_sha_name }}
+        run: |
+          assets_dir="$STEAM_WORK_ROOT/release-assets"
+          python3 .github/scripts/release_artifact.py verify-zip \
+            --zip "$assets_dir/$ZIP_NAME" \
+            --zip-sha "$assets_dir/$ZIP_SHA_NAME" \
+            --expected-tag "$TAG"
+
+      - name: Stage and verify extracted Workshop content
+        id: stage
+        env:
+          ZIP_PATH: ${{ steps.verify.outputs.zip_path }}
+          ZIP_SHA256: ${{ steps.verify.outputs.zip_sha256 }}
+          CONTENTS_SHA_NAME: ${{ steps.release.outputs.contents_sha_name }}
+        run: |
+          python3 .github/scripts/release_artifact.py stage-steam \
+            --zip "$ZIP_PATH" \
+            --zip-sha256 "$ZIP_SHA256" \
+            --contents-sha "$STEAM_WORK_ROOT/release-assets/$CONTENTS_SHA_NAME" \
+            --staging-dir "$STEAM_WORK_ROOT/workshop-staging"
+
+      - name: Generate and validate Workshop VDF
+        id: vdf
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          ITEM_ID: ${{ vars.STEAM_WORKSHOP_ITEM_ID }}
+          CONTENT_FOLDER: ${{ steps.stage.outputs.content_folder }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          UPDATE_PREVIEW: ${{ inputs.update_preview || false }}
+          PREVIEW_FILE: ${{ inputs.preview_file || '' }}
+        run: |
+          args=(
+            --item-id "$ITEM_ID"
+            --content-folder "$CONTENT_FOLDER"
+            --vdf-out "$STEAM_WORK_ROOT/workshop-staging/workshop.vdf"
+            --changelog-file "$STEAM_WORK_ROOT/release-assets/changelog.txt"
+            --tag "$TAG"
+            --release-url "$RELEASE_URL"
+            --staging-dir "$STEAM_WORK_ROOT/workshop-staging"
+          )
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          if [[ "$UPDATE_PREVIEW" == "true" ]]; then
+            args+=(--update-preview --preview-file "$PREVIEW_FILE")
+          fi
+          python3 .github/scripts/release_artifact.py generate-vdf "${args[@]}"
+
+      - name: Validate Steam publishing configuration
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          ITEM_ID: ${{ vars.STEAM_WORKSHOP_ITEM_ID }}
+          HAS_USERNAME: ${{ secrets.STEAM_USERNAME != '' }}
+          HAS_CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF != '' }}
+        run: |
+          missing=()
+          [[ -z "$ITEM_ID" ]] && missing+=("vars.STEAM_WORKSHOP_ITEM_ID")
+          [[ "$HAS_USERNAME" != "true" ]] && missing+=("secrets.STEAM_USERNAME")
+          [[ "$HAS_CONFIG_VDF" != "true" ]] && missing+=("secrets.STEAM_CONFIG_VDF")
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "::notice::Dry run enabled; skipping SteamCMD login and Workshop upload."
+            if (( ${#missing[@]} > 0 )); then
+              echo "::warning::Missing Steam publishing config (required for live upload): ${missing[*]}"
+            else
+              echo "Steam publishing config values are present (item_id=$ITEM_ID; secrets not printed)."
+            fi
+            exit 0
+          fi
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required Steam publishing configuration: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Install SteamCMD
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        run: .github/scripts/steam-ci.sh install
+
+      - name: Restore SteamCMD session
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        env:
+          STEAM_CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF }}
+        run: .github/scripts/steam-ci.sh restore-session
+
+      - name: Authenticate SteamCMD session
+        id: auth
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+        run: .github/scripts/steam-ci.sh auth-check
+
+      - name: Upload verified Workshop content
+        id: upload
+        if: ${{ inputs.dry_run != true && inputs.dry_run != 'true' }}
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          ZIP_PATH: ${{ steps.verify.outputs.zip_path }}
+          ZIP_SHA256: ${{ steps.verify.outputs.zip_sha256 }}
+          CONTENT_FOLDER: ${{ steps.stage.outputs.content_folder }}
+          VDF_PATH: ${{ steps.vdf.outputs.vdf_path }}
+          ITEM_ID: ${{ steps.vdf.outputs.item_id }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          echo "Uploading verified artifact: $ZIP_PATH (SHA-256: $ZIP_SHA256)"
+          echo "SteamCMD workshop_build_item: contentfolder=$CONTENT_FOLDER from verified ZIP $ZIP_PATH ($ZIP_SHA256)"
+          echo "Target Steam Workshop item: $ITEM_ID (selected tag: $TAG; replaces current Workshop content)"
+          .github/scripts/steam-ci.sh upload "$VDF_PATH"
+
+      - name: Write publish summary
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          JOB_STATUS: ${{ job.status }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          COMMIT_SHA: ${{ steps.release.outputs.commit_sha }}
+          ZIP_NAME: ${{ steps.verify.outputs.zip_name }}
+          ZIP_SHA256: ${{ steps.verify.outputs.zip_sha256 }}
+          CONTENT_FOLDER: ${{ steps.stage.outputs.content_folder }}
+          ITEM_ID: ${{ steps.vdf.outputs.item_id }}
+          WORKSHOP_URL: ${{ steps.vdf.outputs.workshop_url }}
+          AUTH_STATUS: ${{ steps.auth.outputs.auth_status }}
+          UPLOAD_STATUS: ${{ steps.upload.outputs.upload_status }}
+          UPLOAD_DETAIL: ${{ steps.upload.outputs.upload_detail }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            outcome="dry-run (no upload attempted)"
+          elif [[ "$UPLOAD_STATUS" == "pass" ]]; then
+            outcome="uploaded"
+          else
+            outcome="failed (upload did not succeed)"
+          fi
+          {
+            echo "### Steam Workshop Publish Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Outcome | \`$outcome\` (job: \`$JOB_STATUS\`) |"
+            echo "| Release tag | \`${TAG:-<unresolved>}\` |"
+            echo "| GitHub Release | ${RELEASE_URL:-<unresolved>} |"
+            echo "| Source commit | \`${COMMIT_SHA:-<unknown>}\` |"
+            echo "| Verified ZIP | \`${ZIP_NAME:-<unverified>}\` |"
+            echo "| ZIP SHA-256 | \`${ZIP_SHA256:-<unverified>}\` |"
+            echo "| Staged contentfolder | \`${CONTENT_FOLDER:-<unstaged>}\` |"
+            echo "| Workshop item ID | \`${ITEM_ID:-<unset>}\` |"
+            if [[ -n "$WORKSHOP_URL" ]]; then
+              echo "| Workshop URL | $WORKSHOP_URL |"
+            fi
+            if [[ "$DRY_RUN" != "true" ]]; then
+              echo "| SteamCMD auth | \`${AUTH_STATUS:-not-run}\` |"
+              echo "| SteamCMD upload | \`${UPLOAD_STATUS:-not-run}\` (${UPLOAD_DETAIL:-no detail}) |"
+            fi
+            echo ""
+            echo "> **Integrity vs. provenance:** Local \`sha256sum -c\` checks verify the ZIP and extracted runtime files against the published GitHub Release manifests. Build provenance is attested separately via GitHub build-provenance attestations."
+            echo ">"
+            echo "> **Rollback / republish policy:** Live Steam publishing intentionally replaces the configured Workshop item's current content with the selected verified release (including historical releases or republishes)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up Steam session and staging
+        if: always()
+        run: |
+          work_root="${STEAM_WORK_ROOT:-$RUNNER_TEMP/standing-order-job-steam}"
+          STEAM_CI_WORK_ROOT="$work_root" .github/scripts/steam-ci.sh cleanup
+          rm -rf "$work_root/release-assets"

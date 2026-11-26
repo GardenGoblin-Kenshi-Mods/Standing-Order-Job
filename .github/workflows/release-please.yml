@@ -1,0 +1,121 @@
+name: release-please
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          # Optional override if GITHUB_TOKEN is restricted again.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  package-release:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = true
+
+      - name: Package (sandboxed Nix build)
+        id: package
+        run: |
+          ./tools/package.sh
+          ./tools/check-binlog-secrets.sh out/StandingOrderJob.binlog
+          version="$(tr -d '[:space:]' < version.txt)"
+          archive="out/StandingOrderJob-${version}.zip"
+          dll="out/StandingOrderJob/StandingOrderJob.dll"
+          python3 - "$archive" "$dll" <<'PY'
+          import sys, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile(sys.argv[1], "r") as zf:
+              zip_dll = zf.read("StandingOrderJob/StandingOrderJob.dll")
+          assert zip_dll == Path(sys.argv[2]).read_bytes(), "DLL inside ZIP differs from standalone DLL!"
+          PY
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "dll=$dll" >> "$GITHUB_OUTPUT"
+
+      - name: Attest compiled DLL
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.package.outputs.dll }}
+
+      - name: Attest distribution ZIP
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.package.outputs.archive }}
+
+      - name: Upload release assets and provenance notes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ steps.package.outputs.version }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          gh release upload "$TAG" \
+            "out/StandingOrderJob-${VERSION}.zip" \
+            "out/StandingOrderJob-${VERSION}.zip.sha256" \
+            "out/StandingOrderJob-${VERSION}.contents.sha256" \
+            "out/StandingOrderJob.binlog" \
+            --clobber
+
+          body="$(gh release view "$TAG" --json body -q .body | python3 -c '
+          import sys
+          text = sys.stdin.read()
+          for marker in ("\n### Build provenance & checksums", "\n### Package checksums (SHA-256)"):
+              idx = text.find(marker)
+              if idx != -1:
+                  text = text[:idx]
+          print(text.rstrip())
+          ')"
+
+          {
+            printf '%s\n\n' "$body"
+            printf '### Build provenance & checksums\n\n'
+            printf -- '- **Originating CI run:** https://github.com/%s/actions/runs/%s\n' "$REPO" "$RUN_ID"
+            printf -- '- **Source commit:** https://github.com/%s/commit/%s (`%s`)\n' "$REPO" "$COMMIT_SHA" "$COMMIT_SHA"
+            printf -- '- **Release tag:** https://github.com/%s/releases/tag/%s\n' "$REPO" "$TAG"
+            printf -- '- **Verification instructions:** https://github.com/%s/blob/%s/README.md#build-transparency--verification\n' "$REPO" "$TAG"
+            printf -- '- **Attestations & build log:** Both `StandingOrderJob-%s.zip` and the extracted `StandingOrderJob/StandingOrderJob.dll` have GitHub build-provenance attestations; `StandingOrderJob.binlog`, `StandingOrderJob-%s.zip.sha256`, and `StandingOrderJob-%s.contents.sha256` are attached.\n\n' "$VERSION" "$VERSION" "$VERSION"
+            ./tools/package-checksums.sh
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+
+  publish-nexus:
+    needs: [release-please, package-release]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/publish-nexus.yml
+    with:
+      release_tag: ${{ needs.release-please.outputs.tag_name }}
+      dry_run: false
+    secrets: inherit
