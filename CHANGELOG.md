@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.0...v0.1.1) (2026-11-26)
+
+
+### Features
+
+* **docs:** update mod descriptions, add issues section, and remove shout outs ([8467d56](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/8467d56b58885f40501e7a518738ffd8aeeb5d67))
+
 ## [0.1.0](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.0.1...v0.1.0) (2026-11-26)
 
 
