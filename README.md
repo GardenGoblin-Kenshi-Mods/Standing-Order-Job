@@ -4,7 +4,7 @@
 
 # Standing Order Job - A Meitou Client mod for Kenshi
 
-Pin squadmates to a spot and keep them there. Hold right-click a player character and choose Stand Here for a one-shot move, or hold Shift to assign a permanent Stand Here job — the same context-menu convention Kenshi already uses for other jobs.
+Pin squadmates to a spot and keep them there. Useful for gate guards and wall archers. Hold right-click a player character and choose Stand Here for a one-shot move, or hold Shift to assign a permanent Stand Here job — the same context-menu convention Kenshi already uses for other jobs.
 
 ## Features
 
@@ -33,6 +33,10 @@ Pin squadmates to a spot and keep them there. Hold right-click a player characte
 ## Requirements
 
 - **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (latest compatible build for `>=0.23.0 <0.24.0`)
+
+## Issues/Incompatibility
+
+Please report bugs, incompatibilities, or other issues on the [GitHub Issues](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/issues) page. Issues posted on Nexus Mods or Steam Workshop may be overlooked.
 
 ## Build Transparency & Verification
 

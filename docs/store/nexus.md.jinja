@@ -33,25 +33,21 @@ Disable {{ assembly_name }}.mod in **Meitou Launcher** and remove the {{ assembl
 ## Requirements
 
 - **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (latest compatible build for {{ game_version }}) — **required**. This mod uses the Meitou Client C# modding API and will not load in vanilla Kenshi or via RE_Kenshi.
-{%- if repo_url | trim %}
-
-## Security & build verification
-
-Meitou code mods run compiled C# inside the game process; third-party code mods are inherently potentially unsafe. Every Nexus Mods upload is the exact same ZIP built by GitHub Actions from the tagged source commit, with SHA-256 manifests, MSBuild binary logs, embedded portable PDBs/sources, and GitHub build-provenance attestations for both the ZIP and extracted DLL — see [Build Transparency & Verification]({{ (repo_url | trim).rstrip('/') }}#build-transparency--verification) and the release changelog links for verification commands and limitations.
-{%- endif %}
 {%- if readme_requirements | trim %}
 {%- if (readme_requirements | trim).startswith('#') %}
 
 {% endif %}
 {{ readme_requirements | trim | replace('`', '') }}
 {%- endif %}
+{%- if repo_url | trim %}
 
-## Shout outs
+## Issues/Incompatibility
 
-- **Lo-Fi Games** for creating Kenshi.
-- **Martin Vlček (VlcekM)** and the **[Meitou Client](https://github.com/VlcekM/MeitouClient)** contributors for building Meitou Client and its C# modding API.
-{%- if nexus_shout_outs | default('') | trim %}
-{{ nexus_shout_outs | trim | replace('`', '') }}
+Please report bugs, incompatibilities, or other issues on the [GitHub Issues]({{ (repo_url | trim).rstrip('/') }}/issues) page. Issues posted on Nexus Mods or Steam Workshop may be overlooked.
+
+## Security & build verification
+
+Meitou code mods run compiled C# inside the game process; third-party code mods are inherently potentially unsafe. Every Nexus Mods upload is the exact same ZIP built by GitHub Actions from the tagged source commit, with SHA-256 manifests, MSBuild binary logs, embedded portable PDBs/sources, and GitHub build-provenance attestations for both the ZIP and extracted DLL — see [Build Transparency & Verification]({{ (repo_url | trim).rstrip('/') }}#build-transparency--verification) and the release changelog links for verification commands and limitations.
 {%- endif %}
 
 ## AI disclosure
