@@ -1,7 +1,7 @@
 {
   "id": "standing-order-job",
   "apiVersion": 3,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "assemblies": [
     "StandingOrderJob.dll"
   ],
