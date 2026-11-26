@@ -4,6 +4,19 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to recover (blank runs Release Please)"
+        type: string
+        required: false
+      publish_nexus:
+        description: "Also publish recovered release to Nexus"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-please-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -17,6 +30,7 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        if: inputs.release_tag == ''
         id: release
         with:
           # Optional override if GITHUB_TOKEN is restricted again.
@@ -24,9 +38,36 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  package-release:
+  resolve-release:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+    steps:
+      - name: Resolve release to package
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          MANUAL_TAG: ${{ inputs.release_tag }}
+          CREATED_TAG: ${{ needs.release-please.outputs.tag_name }}
+          RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+        run: |
+          tag="$MANUAL_TAG"
+          if [[ -z "$tag" && "$RELEASE_CREATED" == "true" ]]; then
+            tag="$CREATED_TAG"
+          fi
+          if [[ -z "$tag" ]]; then
+            exit 0
+          fi
+          if [[ "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft --jq 'select(.isDraft == false) | .tagName')" != "$tag" ]]; then
+            echo "::error::Expected an existing published release for $tag"
+            exit 1
+          fi
+          echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
+
+  package-release:
+    needs: resolve-release
+    if: needs.resolve-release.outputs.tag_name != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -35,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.resolve-release.outputs.tag_name }}
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -63,12 +104,18 @@ jobs:
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "dll=$dll" >> "$GITHUB_OUTPUT"
 
+      # Public repositories support attestations on free plans; private
+      # repositories require an eligible plan and explicit opt-in.
       - name: Attest compiled DLL
+        id: attest_dll
+        if: github.event.repository.private == false || vars.ENABLE_PRIVATE_ATTESTATIONS == 'true'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: ${{ steps.package.outputs.dll }}
 
       - name: Attest distribution ZIP
+        id: attest_zip
+        if: github.event.repository.private == false || vars.ENABLE_PRIVATE_ATTESTATIONS == 'true'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: ${{ steps.package.outputs.archive }}
@@ -76,12 +123,14 @@ jobs:
       - name: Upload release assets and provenance notes
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ needs.resolve-release.outputs.tag_name }}
           VERSION: ${{ steps.package.outputs.version }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          COMMIT_SHA: ${{ github.sha }}
+          ATTESTED: ${{ steps.attest_dll.outcome == 'success' && steps.attest_zip.outcome == 'success' }}
         run: |
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          [[ "v$VERSION" == "$TAG" ]] || { echo "::error::Version does not match tag"; exit 1; }
           gh release upload "$TAG" \
             "out/StandingOrderJob-${VERSION}.zip" \
             "out/StandingOrderJob-${VERSION}.zip.sha256" \
@@ -106,16 +155,21 @@ jobs:
             printf -- '- **Source commit:** https://github.com/%s/commit/%s (`%s`)\n' "$REPO" "$COMMIT_SHA" "$COMMIT_SHA"
             printf -- '- **Release tag:** https://github.com/%s/releases/tag/%s\n' "$REPO" "$TAG"
             printf -- '- **Verification instructions:** https://github.com/%s/blob/%s/README.md#build-transparency--verification\n' "$REPO" "$TAG"
+            if [[ "$ATTESTED" == "true" ]]; then
             printf -- '- **Attestations & build log:** Both `StandingOrderJob-%s.zip` and the extracted `StandingOrderJob/StandingOrderJob.dll` have GitHub build-provenance attestations; `StandingOrderJob.binlog`, `StandingOrderJob-%s.zip.sha256`, and `StandingOrderJob-%s.contents.sha256` are attached.\n\n' "$VERSION" "$VERSION" "$VERSION"
+            else
+              printf -- '- **Attestations:** Not generated (repository visibility or plan configuration).\n'
+              printf -- '- **Build log & checksums:** `StandingOrderJob.binlog`, `StandingOrderJob-%s.zip.sha256`, and `StandingOrderJob-%s.contents.sha256` are attached.\n\n' "$VERSION" "$VERSION"
+            fi
             ./tools/package-checksums.sh
           } > "$RUNNER_TEMP/release-notes.md"
           gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
 
   publish-nexus:
-    needs: [release-please, package-release]
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [resolve-release, package-release]
+    if: needs.package-release.result == 'success' && (inputs.release_tag == '' || inputs.publish_nexus == true)
     uses: ./.github/workflows/publish-nexus.yml
     with:
-      release_tag: ${{ needs.release-please.outputs.tag_name }}
+      release_tag: ${{ needs.resolve-release.outputs.tag_name }}
       dry_run: false
     secrets: inherit
