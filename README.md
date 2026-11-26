@@ -1,6 +1,6 @@
 ![Standing Order Job](assets/Standing_Order_Job_readme_banner.png)
 
-<p align="center"><a href="https://www.nexusmods.com/kenshi/mods/2308">Nexus Mods</a></p>
+<p align="center"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3846152406">Steam Workshop</a> · <a href="https://www.nexusmods.com/kenshi/mods/2308">Nexus Mods</a></p>
 
 # Standing Order Job - A Meitou Client mod for Kenshi
 

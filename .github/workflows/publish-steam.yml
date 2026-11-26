@@ -141,6 +141,8 @@ jobs:
             --tag "$TAG"
             --release-url "$RELEASE_URL"
             --staging-dir "$STEAM_WORK_ROOT/workshop-staging"
+            --steam-template docs/store/steam.md.jinja
+            --copier-answers .copier-answers.yml
           )
           if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
@@ -224,6 +226,7 @@ jobs:
           CONTENT_FOLDER: ${{ steps.stage.outputs.content_folder }}
           ITEM_ID: ${{ steps.vdf.outputs.item_id }}
           WORKSHOP_URL: ${{ steps.vdf.outputs.workshop_url }}
+          DESCRIPTION_CHARS: ${{ steps.vdf.outputs.description_chars }}
           AUTH_STATUS: ${{ steps.auth.outputs.auth_status }}
           UPLOAD_STATUS: ${{ steps.upload.outputs.upload_status }}
           UPLOAD_DETAIL: ${{ steps.upload.outputs.upload_detail }}
@@ -248,6 +251,9 @@ jobs:
             echo "| ZIP SHA-256 | \`${ZIP_SHA256:-<unverified>}\` |"
             echo "| Staged contentfolder | \`${CONTENT_FOLDER:-<unstaged>}\` |"
             echo "| Workshop item ID | \`${ITEM_ID:-<unset>}\` |"
+            if [[ -n "$DESCRIPTION_CHARS" && "$DESCRIPTION_CHARS" != "0" ]]; then
+              echo "| Workshop description | synced from \`docs/store/steam.md.jinja\` (\`${DESCRIPTION_CHARS}\` chars BBCode) |"
+            fi
             if [[ -n "$WORKSHOP_URL" ]]; then
               echo "| Workshop URL | $WORKSHOP_URL |"
             fi

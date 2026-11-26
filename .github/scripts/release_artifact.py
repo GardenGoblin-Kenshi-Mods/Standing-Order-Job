@@ -31,6 +31,7 @@ REQUIRED_ARCHIVE_FILES: frozenset[str] = frozenset(
 ALLOWED_PREVIEW_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".gif"})
 MAX_PREVIEW_BYTES = 1024 * 1024  # Steam Workshop 1 MiB preview image cap
 MAX_CHANGENOTE_CHARS = 4000
+MAX_DESCRIPTION_CHARS = 8000  # Steam Workshop ISteamUGC::SetItemDescription cap
 SHA256_LINE_RE = re.compile(r"^([0-9a-fA-F]{64})\s+\*?(.+)$")
 POSITIVE_INT_RE = re.compile(r"^[1-9][0-9]*$")
 
@@ -385,50 +386,430 @@ def stage_and_verify_steam_content(
 
 
 def escape_vdf_value(text: str) -> str:
-    """Escape a string value for Valve KeyValues double-quoted syntax."""
+    """Prepare a string value for SteamCMD Valve KeyValues double-quoted syntax.
+
+    SteamCMD's workshop_build_item VDF reader preserves real newlines inside quotes
+    and does not unescape C-style \\n or \\" sequences, so literal newlines are kept
+    and embedded double quotes are replaced with single quotes.
+    """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    escaped = normalized.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-    return escaped
+    return normalized.replace('"', "'")
+
+
+def _decode_single_quoted_yaml(chunks: list[str]) -> str:
+    out_parts: list[str] = []
+    blank_run = 0
+    for raw in chunks:
+        part = raw.replace("''", "'")
+        if part == "":
+            blank_run += 1
+        else:
+            if out_parts:
+                out_parts.append("\n" * blank_run if blank_run > 0 else " ")
+            blank_run = 0
+            out_parts.append(part)
+    return "".join(out_parts).strip()
+
+
+def _fold_yaml_lines(lines: list[str]) -> str:
+    out: list[str] = []
+    for line in lines:
+        if line == "":
+            out.append("\n")
+        elif out and not out[-1].endswith("\n"):
+            out.append(" " + line)
+        else:
+            out.append(line)
+    return "".join(out)
+
+
+def parse_simple_yaml(text: str) -> dict[str, str]:
+    """Parse flat Copier answer YAML (plain, quoted, and block scalars) using stdlib only."""
+    lines = text.splitlines()
+    data: dict[str, str] = {}
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+
+        match = re.match(r"^([A-Za-z0-9_]+):\s*(.*)$", line)
+        if not match:
+            i += 1
+            continue
+
+        key, rest = match.group(1), match.group(2)
+        i += 1
+
+        if rest in ("|", "|-", ">", ">-"):
+            block_lines: list[str] = []
+            indent: int | None = None
+            while i < n:
+                nxt = lines[i]
+                if nxt.strip() == "":
+                    block_lines.append("")
+                    i += 1
+                    continue
+                cur_indent = len(nxt) - len(nxt.lstrip(" "))
+                if cur_indent == 0 and re.match(r"^[A-Za-z0-9_]+:", nxt):
+                    break
+                if indent is None:
+                    indent = cur_indent
+                block_lines.append(nxt[indent:] if len(nxt) >= indent else nxt.lstrip(" "))
+                i += 1
+            val = _fold_yaml_lines(block_lines) if rest.startswith(">") else "\n".join(block_lines)
+            data[key] = val.strip() if rest.endswith("-") else val
+        elif rest.startswith("'") and (len(rest) == 1 or not rest.endswith("'") or rest == "'"):
+            chunks = [rest[1:]]
+            while i < n:
+                nxt = lines[i]
+                i += 1
+                stripped_nxt = nxt.lstrip(" ")
+                trailing = len(stripped_nxt) - len(stripped_nxt.rstrip("'"))
+                if trailing % 2 == 1:
+                    chunks.append(stripped_nxt[:-1])
+                    break
+                chunks.append(stripped_nxt)
+            data[key] = _decode_single_quoted_yaml(chunks)
+        elif rest.startswith("'") and rest.endswith("'") and len(rest) >= 2:
+            data[key] = rest[1:-1].replace("''", "'")
+        elif rest.startswith('"') and rest.endswith('"') and len(rest) >= 2:
+            data[key] = rest[1:-1].replace('\\"', '"').replace("\\n", "\n")
+        else:
+            data[key] = rest.strip()
+
+    return data
+
+
+def _eval_store_expr(expr: str, ctx: dict[str, str]) -> object:
+    """Evaluate the constrained Jinja expressions used by docs/store/steam.md.jinja."""
+    s = expr.strip()
+
+    # Handle trailing .startswith('#') check
+    sw_match = re.fullmatch(r"\((.+)\)\.startswith\((['\"])(.*?)\2\)", s)
+    if sw_match:
+        inner = str(_eval_store_expr(sw_match.group(1), ctx))
+        return inner.startswith(sw_match.group(3))
+
+    # Handle trailing .rstrip('/')
+    rs_match = re.fullmatch(r"\((.+)\)\.rstrip\((['\"])(.*?)\2\)", s)
+    if rs_match:
+        inner = str(_eval_store_expr(rs_match.group(1), ctx))
+        return inner.rstrip(rs_match.group(3))
+
+    # Split top-level pipe filters (ignoring pipes inside parentheses/quotes)
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    quote: str | None = None
+    for ch in s:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+        elif ch == "(":
+            depth += 1
+            buf.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif ch == "|" and depth == 0:
+            parts.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf).strip())
+
+    base = parts[0]
+    if (base.startswith("'") and base.endswith("'")) or (base.startswith('"') and base.endswith('"')):
+        val: object = base[1:-1]
+    elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", base):
+        val = ctx.get(base, "")
+    else:
+        raise ValueError(f"Unsupported store template expression: {expr!r}")
+
+    for flt in parts[1:]:
+        if flt == "trim":
+            val = str(val).strip()
+        elif flt.startswith("default(") and flt.endswith(")"):
+            fallback_expr = flt[len("default(") : -1].strip()
+            if not val:
+                val = _eval_store_expr(fallback_expr, ctx)
+        else:
+            raise ValueError(f"Unsupported store template filter: {flt!r}")
+
+    return val
+
+
+def render_store_template(template_text: str, answers: dict[str, str]) -> str:
+    """Render docs/store/steam.md.jinja using Jinja2 if installed, else pure-stdlib evaluator."""
+    try:
+        import jinja2  # type: ignore[import-not-found]
+    except ImportError:
+        jinja2 = None
+
+    if jinja2 is not None:
+        env = jinja2.Environment(autoescape=False, undefined=jinja2.Undefined)
+        rendered = env.from_string(template_text).render(**answers).strip()
+    else:
+        # Strip Jinja comments {# ... #}
+        text = re.sub(r"\{#.*?#\}", "", template_text, flags=re.DOTALL)
+
+        # Tokenize {% if ... %}, {% endif %}, and {{ ... }} (handling leading '-' whitespace trim).
+        token_re = re.compile(r"(\{%-?\s*.*?\s*-?%\}|\{\{-?\s*.*?\s*-?\}\})", re.DOTALL)
+        tokens = token_re.split(text)
+
+        out: list[str] = []
+        cond_stack: list[bool] = [True]
+        trim_next = False
+
+        for tok in tokens:
+            if not tok:
+                continue
+            if tok.startswith("{%"):
+                trim_prev = tok.startswith("{%-")
+                trim_cur_next = tok.endswith("-%}")
+                inner = tok[3 if trim_prev else 2 : -3 if trim_cur_next else -2].strip()
+                if trim_prev and out:
+                    out[-1] = out[-1].rstrip(" \t\r\n")
+                if inner.startswith("if "):
+                    cond_expr = inner[3:].strip()
+                    parent_active = cond_stack[-1]
+                    cond_stack.append(bool(_eval_store_expr(cond_expr, answers)) if parent_active else False)
+                elif inner == "endif":
+                    if len(cond_stack) <= 1:
+                        raise ValueError("Unmatched {% endif %} in store template.")
+                    cond_stack.pop()
+                else:
+                    raise ValueError(f"Unsupported control tag in store template: {inner!r}")
+                trim_next = trim_cur_next
+            elif tok.startswith("{{"):
+                trim_prev = tok.startswith("{{-")
+                trim_cur_next = tok.endswith("-}}")
+                inner = tok[3 if trim_prev else 2 : -3 if trim_cur_next else -2].strip()
+                if trim_prev and out:
+                    out[-1] = out[-1].rstrip(" \t\r\n")
+                if cond_stack[-1]:
+                    out.append(str(_eval_store_expr(inner, answers)))
+                trim_next = trim_cur_next
+            else:
+                chunk = tok.lstrip(" \t\r\n") if trim_next else tok
+                trim_next = False
+                if cond_stack[-1]:
+                    out.append(chunk)
+
+        if len(cond_stack) != 1:
+            raise ValueError("Unclosed {% if %} block in store template.")
+        rendered = "".join(out).strip()
+
+    if "{{" in rendered or "{%" in rendered:
+        raise ValueError("Rendered store description still contains unexpanded Jinja tags.")
+    return rendered
+
+
+def _convert_inline_md_to_bbcode(text: str) -> str:
+    """Convert inline Markdown links, bold, and backticks into Steam Workshop BBCode."""
+    # Convert Markdown links [label](url) first so bold around links becomes [b][url=...]...[/url][/b].
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"[url=\2]\1[/url]", text)
+    # Convert **bold** -> [b]bold[/b]
+    text = re.sub(r"\*\*([^*]+)\*\*", r"[b]\1[/b]", text)
+    # Steam's [code] is block-level; strip inline backticks cleanly instead of breaking paragraphs.
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    return text
+
+
+def markdown_to_steam_bbcode(md_text: str) -> str:
+    """Convert store-page Markdown into Steam Workshop BBCode."""
+    lines = md_text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    out: list[str] = []
+    list_kind: str | None = None  # "list" or "olist"
+
+    def close_list() -> None:
+        nonlocal list_kind
+        if list_kind is not None:
+            out.append(f"[/{list_kind}]")
+            list_kind = None
+
+    def last_is_heading() -> bool:
+        return bool(out) and bool(re.match(r"^\[h[1-3]\].*\[/h[1-3]\]$", out[-1]))
+
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped:
+            close_list()
+            if out and out[-1] != "" and not last_is_heading():
+                out.append("")
+            continue
+
+        h_match = re.match(r"^(#{1,3})\s+(.+)$", stripped)
+        if h_match:
+            close_list()
+            if out and out[-1] != "" and not last_is_heading():
+                out.append("")
+            level = len(h_match.group(1))
+            heading = _convert_inline_md_to_bbcode(h_match.group(2).strip())
+            out.append(f"[h{level}]{heading}[/h{level}]")
+            continue
+
+        ul_match = re.match(r"^[-*]\s+(.+)$", stripped)
+        if ul_match:
+            if list_kind != "list":
+                close_list()
+                if out and out[-1] == "" and len(out) >= 2 and re.match(r"^\[h[1-3]\].*\[/h[1-3]\]$", out[-2]):
+                    out.pop()
+                out.append("[list]")
+                list_kind = "list"
+            out.append(f"[*] {_convert_inline_md_to_bbcode(ul_match.group(1).strip())}")
+            continue
+
+        ol_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+        if ol_match:
+            if list_kind != "olist":
+                close_list()
+                if out and out[-1] == "" and len(out) >= 2 and re.match(r"^\[h[1-3]\].*\[/h[1-3]\]$", out[-2]):
+                    out.pop()
+                out.append("[olist]")
+                list_kind = "olist"
+            out.append(f"[*] {_convert_inline_md_to_bbcode(ol_match.group(1).strip())}")
+            continue
+
+        close_list()
+        out.append(_convert_inline_md_to_bbcode(stripped))
+
+    close_list()
+    return "\n".join(out).strip()
+
+
+def load_steam_description(
+    description_file: Path | None = None,
+    steam_template: Path | None = None,
+    copier_answers: Path | None = None,
+) -> str:
+    """Load and convert Steam Workshop description to BBCode from a rendered file or Jinja template."""
+    if description_file is not None:
+        if not description_file.is_file():
+            raise ValueError(f"Steam description file does not exist: {description_file}")
+        raw_text = description_file.read_text(encoding="utf-8").strip()
+        if not raw_text:
+            raise ValueError(f"Steam description file is empty: {description_file}")
+        return markdown_to_steam_bbcode(raw_text) if description_file.suffix.lower() == ".md" else raw_text
+
+    if steam_template is not None:
+        if not steam_template.is_file():
+            raise ValueError(f"Steam store template does not exist: {steam_template}")
+        if copier_answers is None or not copier_answers.is_file():
+            raise ValueError(f"Copier answers file required for steam_template does not exist: {copier_answers}")
+        answers = parse_simple_yaml(copier_answers.read_text(encoding="utf-8"))
+        rendered_md = render_store_template(steam_template.read_text(encoding="utf-8"), answers)
+        if not rendered_md:
+            raise ValueError(f"Rendered Steam store template is empty: {steam_template}")
+        return markdown_to_steam_bbcode(rendered_md)
+
+    return ""
+
+
+def build_release_note_url(release_url: str, tag: str) -> str:
+    """Append /releases/tag/<tag> to a GitHub repo URL when a tag is present; fall back cleanly when absent."""
+    base = release_url.strip().rstrip("/")
+    clean_tag = tag.strip()
+    if not base or not clean_tag:
+        return base
+    if "/releases/tag/" in base:
+        return base
+    if re.fullmatch(r"https?://github\.com/[^/]+/[^/]+/releases", base):
+        return f"{base}/tag/{clean_tag}"
+    if re.fullmatch(r"https?://github\.com/[^/]+/[^/]+", base):
+        return f"{base}/releases/tag/{clean_tag}"
+    return base
 
 
 def format_changenote(changelog: str, tag: str, release_url: str, max_chars: int = MAX_CHANGENOTE_CHARS) -> str:
+    clean_tag = tag.strip()
+    target_url = build_release_note_url(release_url, clean_tag)
     body = changelog.replace("\r\n", "\n").replace("\r", "\n").strip()
-    footer = f"Release: {tag} ({release_url})"
+    if body:
+        # Convert Markdown links so Steam never sees "(https://..." which triggers its malicious link filter.
+        body = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"[url=\2]\1[/url]", body)
+        body = re.sub(r"\((https?://[^)\s]+)\)", r"\1", body)
+
+    if clean_tag:
+        footer = f"Release {clean_tag} - {target_url}" if target_url else f"Release {clean_tag}"
+    else:
+        footer = f"Release - {target_url}" if target_url else "Release"
+
     if not body:
         note = footer
-    elif release_url in body:
+    elif target_url and target_url in body:
         note = body
     else:
         note = f"{body}\n\n{footer}"
 
     if len(note) > max_chars:
-        suffix = f"\n...\nFull changelog: {release_url}"
+        suffix = f"\n...\nFull changelog: {target_url}" if target_url else "\n..."
         keep = max(0, max_chars - len(suffix))
         note = note[:keep].rstrip() + suffix
     return note
 
 
 def parse_simple_vdf(vdf_text: str) -> tuple[str, dict[str, str]]:
-    """Parse our flat generated Valve KeyValues workshopitem block back to verify syntax."""
-    lines = [line.strip() for line in vdf_text.splitlines() if line.strip()]
-    if len(lines) < 3 or lines[1] != "{" or lines[-1] != "}":
+    """Parse our flat generated Valve KeyValues workshopitem block (supporting multiline quoted values)."""
+    text = vdf_text
+    n = len(text)
+    pos = 0
+
+    def skip_ws() -> None:
+        nonlocal pos
+        while pos < n and text[pos] in " \t\r\n":
+            pos += 1
+
+    def read_quoted(allow_newlines: bool) -> str:
+        nonlocal pos
+        if pos >= n or text[pos] != '"':
+            raise ValueError(f"Generated VDF expected quoted string at offset {pos}.")
+        pos += 1
+        start = pos
+        while pos < n and text[pos] != '"':
+            if not allow_newlines and text[pos] in "\r\n":
+                raise ValueError("Generated VDF key contains a newline.")
+            pos += 1
+        if pos >= n:
+            raise ValueError("Generated VDF has an unterminated quoted string.")
+        val = text[start:pos]
+        pos += 1
+        return val
+
+    skip_ws()
+    root_name = read_quoted(allow_newlines=False)
+    skip_ws()
+    if pos >= n or text[pos] != "{":
         raise ValueError("Generated VDF does not have expected root { ... } structure.")
+    pos += 1
 
-    root_match = re.fullmatch(r'"([^"]+)"', lines[0])
-    if not root_match:
-        raise ValueError(f"Generated VDF has malformed root header: {lines[0]!r}")
-    root_name = root_match.group(1)
-
-    kv_re = re.compile(r'^"([^"\\]+)"\s+"((?:[^"\\]|\\.)*)"$')
     values: dict[str, str] = {}
-    for line in lines[2:-1]:
-        match = kv_re.match(line)
-        if not match:
-            raise ValueError(f"Generated VDF has malformed KeyValues entry: {line!r}")
-        key, val = match.group(1), match.group(2)
+    while True:
+        skip_ws()
+        if pos >= n:
+            raise ValueError("Generated VDF is missing closing '}'.")
+        if text[pos] == "}":
+            pos += 1
+            break
+        key = read_quoted(allow_newlines=False)
+        skip_ws()
+        val = read_quoted(allow_newlines=True)
         if key in values:
             raise ValueError(f"Generated VDF has duplicate key: {key!r}")
         values[key] = val
+
+    skip_ws()
+    if pos != n:
+        raise ValueError(f"Generated VDF has unexpected trailing content at offset {pos}.")
     return root_name, values
 
 
@@ -462,8 +843,9 @@ def generate_workshop_vdf(
     update_preview: bool = False,
     preview_file: Path | None = None,
     staging_dir: Path | None = None,
+    description: str = "",
 ) -> dict[str, str]:
-    """Generate and validate a minimal Valve KeyValues workshop.vdf outside contentfolder."""
+    """Generate and validate a Valve KeyValues workshop.vdf outside contentfolder."""
     cleaned_id = item_id.strip()
     if cleaned_id == "":
         if not dry_run:
@@ -515,6 +897,13 @@ def generate_workshop_vdf(
         staged_preview.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(preview_file, staged_preview)
 
+    cleaned_description = description.strip()
+    if len(cleaned_description) > MAX_DESCRIPTION_CHARS:
+        raise ValueError(
+            f"Steam Workshop description length ({len(cleaned_description)} chars) exceeds "
+            f"Steam's {MAX_DESCRIPTION_CHARS}-character limit."
+        )
+
     note = format_changenote(changelog, tag, release_url)
     fields: list[tuple[str, str]] = [
         ("appid", KENSHI_APP_ID),
@@ -523,6 +912,8 @@ def generate_workshop_vdf(
     ]
     if staged_preview is not None:
         fields.append(("previewfile", str(staged_preview)))
+    if cleaned_description:
+        fields.append(("description", cleaned_description))
     fields.append(("changenote", note))
 
     lines = ['"workshopitem"', "{"]
@@ -546,21 +937,27 @@ def generate_workshop_vdf(
         raise ValueError("Live VDF publishedfileid is not a positive integer.")
     if not os.path.isabs(parsed.get("contentfolder", "")):
         raise ValueError("Generated VDF contentfolder is not an absolute path.")
-    for forbidden_key in ("title", "description", "visibility"):
+    for forbidden_key in ("title", "visibility"):
         if forbidden_key in parsed:
             raise ValueError(f"Routine upload VDF must not set {forbidden_key!r}.")
     if not update_preview and "previewfile" in parsed:
         raise ValueError("Routine upload VDF must not set 'previewfile' when update_preview is false.")
+    if not cleaned_description and "description" in parsed:
+        raise ValueError("Routine upload VDF must not set 'description' when no description is supplied.")
 
     print(f"Generated and validated Workshop VDF: {abs_vdf}")
     print(f"  appid={KENSHI_APP_ID} publishedfileid={effective_id} contentfolder={abs_content}")
     print(f"  previewfile={staged_preview if staged_preview else '<omitted (preserved manually)>'}")
+    print(
+        f"  description={f'included ({len(cleaned_description)} chars, Steam BBCode)' if cleaned_description else '<omitted>'}"
+    )
 
     return {
         "vdf_path": str(abs_vdf),
         "item_id": effective_id,
         "workshop_url": workshop_url,
         "preview_path": str(staged_preview) if staged_preview else "",
+        "description_chars": str(len(cleaned_description)),
     }
 
 
@@ -643,6 +1040,11 @@ def cmd_generate_vdf(args: argparse.Namespace) -> int:
         changelog = Path(args.changelog_file).read_text(encoding="utf-8") if args.changelog_file else ""
         preview = Path(args.preview_file) if args.preview_file else None
         staging = Path(args.staging_dir) if args.staging_dir else None
+        description = load_steam_description(
+            description_file=Path(args.description_file) if args.description_file else None,
+            steam_template=Path(args.steam_template) if args.steam_template else None,
+            copier_answers=Path(args.copier_answers) if args.copier_answers else None,
+        )
         result = generate_workshop_vdf(
             item_id=args.item_id,
             content_folder=Path(args.content_folder),
@@ -654,6 +1056,7 @@ def cmd_generate_vdf(args: argparse.Namespace) -> int:
             update_preview=args.update_preview,
             preview_file=preview,
             staging_dir=staging,
+            description=description,
         )
     except ValueError as exc:
         print(f"::error::{exc}", file=sys.stderr)
@@ -697,12 +1100,15 @@ def main(argv: list[str] | None = None) -> int:
     p_vdf.add_argument("--content-folder", required=True)
     p_vdf.add_argument("--vdf-out", required=True)
     p_vdf.add_argument("--changelog-file", default="")
-    p_vdf.add_argument("--tag", required=True)
+    p_vdf.add_argument("--tag", default="")
     p_vdf.add_argument("--release-url", required=True)
     p_vdf.add_argument("--dry-run", action="store_true")
     p_vdf.add_argument("--update-preview", action="store_true")
     p_vdf.add_argument("--preview-file", default="")
     p_vdf.add_argument("--staging-dir", default="")
+    p_vdf.add_argument("--description-file", default="")
+    p_vdf.add_argument("--steam-template", default="")
+    p_vdf.add_argument("--copier-answers", default="")
     p_vdf.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
     p_vdf.set_defaults(func=cmd_generate_vdf)
 

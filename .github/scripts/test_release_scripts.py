@@ -262,8 +262,9 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertNotIn("description", parsed)
             self.assertNotIn("visibility", parsed)
             self.assertNotIn("previewfile", parsed)
-            self.assertIn('\\"quotes\\"', parsed["changenote"])
-            self.assertIn("C:\\\\path\\\\slash\\nLine 2", parsed["changenote"])
+            self.assertIn("'quotes'", parsed["changenote"])
+            self.assertIn("C:\\path\\slash\nLine 2", parsed["changenote"])
+            self.assertNotIn("\\n", parsed["changenote"])
 
             # Blank item ID fails closed on live, allowed as placeholder on dry-run.
             with self.assertRaises(ValueError):
@@ -347,6 +348,90 @@ class ReleaseArtifactTests(unittest.TestCase):
                     preview_file=fake_png,
                     staging_dir=root,
                 )
+
+    def test_steam_description_template_rendering_bbcode_and_vdf_limit(self) -> None:
+        mod_root = SCRIPTS_DIR.parent.parent
+        bbcode = release_artifact.load_steam_description(
+            steam_template=mod_root / "docs" / "store" / "steam.md.jinja",
+            copier_answers=mod_root / ".copier-answers.yml",
+        )
+        self.assertIn("[h2]Description[/h2]", bbcode)
+        self.assertIn("[h3]Steam Workshop[/h3]", bbcode)
+        self.assertIn("[olist]", bbcode)
+        self.assertIn("[list]", bbcode)
+        self.assertIn("[url=https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job]", bbcode)
+        self.assertNotIn("{{", bbcode)
+        self.assertNotIn("{%", bbcode)
+        self.assertNotIn("## ", bbcode)
+        self.assertNotIn("](https://", bbcode)
+        self.assertLessEqual(len(bbcode), release_artifact.MAX_DESCRIPTION_CHARS)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            content = root / "extract" / "StandingOrderJob"
+            content.mkdir(parents=True)
+            vdf_out = root / "workshop.vdf"
+
+            with redirect_stdout(io.StringIO()):
+                res = release_artifact.generate_workshop_vdf(
+                    item_id="3846152406",
+                    content_folder=content,
+                    vdf_out=vdf_out,
+                    changelog="note",
+                    tag="v0.1.0",
+                    release_url="https://github.com/org/repo/releases/tag/v0.1.0",
+                    dry_run=False,
+                    description=bbcode,
+                )
+            self.assertEqual(res["description_chars"], str(len(bbcode)))
+            _root_key, parsed = release_artifact.parse_simple_vdf(vdf_out.read_text(encoding="utf-8"))
+            self.assertIn("description", parsed)
+            self.assertIn("[h2]Description[/h2]", parsed["description"])
+            self.assertNotIn("title", parsed)
+            self.assertNotIn("visibility", parsed)
+
+            # Exceeding Steam's 8000-char limit must fail closed.
+            with self.assertRaises(ValueError):
+                release_artifact.generate_workshop_vdf(
+                    item_id="3846152406",
+                    content_folder=content,
+                    vdf_out=vdf_out,
+                    changelog="note",
+                    tag="v0.1.0",
+                    release_url="https://github.com/org/repo/releases/tag/v0.1.0",
+                    dry_run=False,
+                    description="x" * (release_artifact.MAX_DESCRIPTION_CHARS + 1),
+                )
+
+    def test_format_changenote_avoids_parenthesized_urls_and_handles_tag_fallback(self) -> None:
+        base_repo = "https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job"
+
+        # With tag on repo URL: appends /releases/tag/<tag> and never wraps URL in parentheses.
+        with_tag = release_artifact.format_changenote("", "v0.1.0", base_repo)
+        self.assertEqual(
+            with_tag,
+            f"Release v0.1.0 - {base_repo}/releases/tag/v0.1.0",
+        )
+        self.assertNotIn("(http", with_tag)
+
+        # Already tag-scoped release URL is not duplicated.
+        already_tagged = release_artifact.format_changenote("", "v0.1.0", f"{base_repo}/releases/tag/v0.1.0")
+        self.assertEqual(
+            already_tagged,
+            f"Release v0.1.0 - {base_repo}/releases/tag/v0.1.0",
+        )
+
+        # Fallback to no tag when tag is blank.
+        no_tag = release_artifact.format_changenote("", "", base_repo)
+        self.assertEqual(no_tag, f"Release - {base_repo}")
+        self.assertNotIn("(http", no_tag)
+
+        # Markdown links and bare parenthesized URLs inside body are sanitized for Steam.
+        body = "Added feature ([#4](https://github.com/org/repo/issues/4)) (https://example.com/notes)"
+        note = release_artifact.format_changenote(body, "v0.2.0", base_repo)
+        self.assertNotIn("(http", note)
+        self.assertIn("[url=https://github.com/org/repo/issues/4]#4[/url]", note)
+        self.assertIn(f"Release v0.2.0 - {base_repo}/releases/tag/v0.2.0", note)
 
 
 class NexusPreflightTests(unittest.TestCase):
