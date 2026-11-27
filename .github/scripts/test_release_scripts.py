@@ -664,6 +664,52 @@ class ReleaseArtifactTests(unittest.TestCase):
             ],
         )
 
+    def test_prepare_github_release_body_places_meitou_requirement_below_title_and_is_idempotent(self) -> None:
+        raw = (
+            "## [0.1.3](https://github.com/org/repo/compare/v0.1.2...v0.1.3) (2026-11-27)\n\n\n"
+            "### Features\n\n"
+            "* Move TaskType to 400000\n\n"
+            "### Build provenance & checksums\n\n"
+            "- **Originating CI run:** https://github.com/org/repo/actions/runs/1\n"
+        )
+        prepared = release_artifact.prepare_github_release_body(raw, ">=0.24.0")
+        self.assertEqual(
+            prepared,
+            "## [0.1.3](https://github.com/org/repo/compare/v0.1.2...v0.1.3) (2026-11-27)\n\n"
+            "**Requires Meitou Client:** `>=0.24.0`\n\n"
+            "### Features\n\n"
+            "* Move TaskType to 400000",
+        )
+        # Re-running on a recovered release is idempotent and updates cleanly.
+        re_prepared = release_artifact.prepare_github_release_body(
+            prepared + "\n\n### Build provenance & checksums\n\n- old", ">=0.24.0"
+        )
+        self.assertEqual(re_prepared, prepared)
+
+        # Without a title heading, requirement goes at the top above sections.
+        no_title = release_artifact.prepare_github_release_body("### Bug Fixes\n\n* Fix crash", ">=0.24.0")
+        self.assertEqual(no_title, "**Requires Meitou Client:** `>=0.24.0`\n\n### Bug Fixes\n\n* Fix crash")
+
+        # Steam changenote and Nexus changelog do not duplicate the injected requirement line as a bullet.
+        steam_note = release_artifact.format_changenote(
+            prepared, "v0.1.3", "https://github.com/org/repo/releases/tag/v0.1.3", game_version=">=0.24.0"
+        )
+        self.assertEqual(
+            steam_note,
+            "Release v0.1.3 - MeitouClient >=0.24.0 - https://github.com/org/repo/releases/tag/v0.1.3\n\n"
+            "- Features: Move TaskType to 400000",
+        )
+        nexus_log = release_artifact.format_nexus_changelog(
+            prepared, "v0.1.3", "https://github.com/org/repo/releases/tag/v0.1.3"
+        )
+        self.assertEqual(
+            nexus_log.splitlines(),
+            [
+                "Features: Move TaskType to 400000",
+                "GitHub Release (checksums & attestations): https://github.com/org/repo/releases/tag/v0.1.3",
+            ],
+        )
+
 
 class NexusPreflightTests(unittest.TestCase):
     def test_extract_web_mod_id_handles_v3_and_game_scoped_ids(self) -> None:

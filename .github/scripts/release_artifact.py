@@ -921,6 +921,46 @@ def build_release_note_url(release_url: str, tag: str) -> str:
     return base
 
 
+MEITOU_REQUIREMENT_PREFIX = "**Requires Meitou Client:**"
+
+
+def prepare_github_release_body(body: str, game_version: str) -> str:
+    """Strip provenance tails and idempotently insert the Meitou Client requirement below the title heading."""
+    text = body.replace("\r\n", "\n").replace("\r", "\n")
+    for marker in ("\n### Build provenance & checksums", "\n### Package checksums (SHA-256)"):
+        idx = text.find(marker)
+        if idx != -1:
+            text = text[:idx]
+    text = text.strip()
+
+    # Remove any previously injected requirement line so recovery runs remain idempotent.
+    raw_lines = [line for line in text.splitlines() if not line.strip().startswith(MEITOU_REQUIREMENT_PREFIX)]
+    # Collapse leading/trailing blank lines.
+    while raw_lines and not raw_lines[0].strip():
+        raw_lines.pop(0)
+    while raw_lines and not raw_lines[-1].strip():
+        raw_lines.pop()
+
+    clean_gv = game_version.strip()
+    if not clean_gv:
+        return "\n".join(raw_lines)
+
+    req_line = f"{MEITOU_REQUIREMENT_PREFIX} `{clean_gv}`"
+    if not raw_lines:
+        return req_line
+
+    if re.match(r"^#{1,2}\s+", raw_lines[0].strip()):
+        title = raw_lines[0].rstrip()
+        rest = raw_lines[1:]
+        while rest and not rest[0].strip():
+            rest.pop(0)
+        if rest:
+            return f"{title}\n\n{req_line}\n\n" + "\n".join(rest)
+        return f"{title}\n\n{req_line}"
+
+    return f"{req_line}\n\n" + "\n".join(raw_lines)
+
+
 def _strip_inline_md_for_plain_text(text: str) -> str:
     """Convert inline Markdown to clean plain text suitable for Nexus Mods bullet lines."""
     # Drop trailing release-please commit links such as " ([8467d56](https://github.com/.../commit/...))".
@@ -966,6 +1006,9 @@ def _extract_plain_changelog_bullets(changelog: str) -> tuple[list[str], str]:
             continue
         # Skip top-level release title headings ("# ..." or "## [0.1.1](...)").
         if re.match(r"^#{1,2}\s+", stripped):
+            continue
+        # Skip injected Meitou Client requirement banner (already shown in Steam header / Nexus description).
+        if stripped.startswith(MEITOU_REQUIREMENT_PREFIX):
             continue
         # Track section headings ("### Features", "### Bug Fixes", etc.) as prefixes.
         sec_match = re.match(r"^#{3,6}\s+(.+)$", stripped)
@@ -1364,6 +1407,22 @@ def cmd_stage_steam(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prepare_release_body(args: argparse.Namespace) -> int:
+    try:
+        game_version = args.game_version.strip()
+        if not game_version and args.meitou_json:
+            meta = json.loads(Path(args.meitou_json).read_text(encoding="utf-8"))
+            game_version = str(meta.get("gameVersion", "")).strip()
+        raw_body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else sys.stdin.read()
+        prepared = prepare_github_release_body(raw_body, game_version)
+    except (OSError, ValueError) as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
+
+    print(prepared)
+    return 0
+
+
 def cmd_generate_vdf(args: argparse.Namespace) -> int:
     try:
         changelog = Path(args.changelog_file).read_text(encoding="utf-8") if args.changelog_file else ""
@@ -1451,6 +1510,15 @@ def main(argv: list[str] | None = None) -> int:
     p_vdf.add_argument("--git-dir", default=".")
     p_vdf.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
     p_vdf.set_defaults(func=cmd_generate_vdf)
+
+    p_body = sub.add_parser(
+        "prepare-release-body",
+        help="Strip provenance tail and insert Meitou Client requirement below the release title heading",
+    )
+    p_body.add_argument("--body-file", default="")
+    p_body.add_argument("--meitou-json", default="")
+    p_body.add_argument("--game-version", default="")
+    p_body.set_defaults(func=cmd_prepare_release_body)
 
     args = parser.parse_args(argv)
     return args.func(args)

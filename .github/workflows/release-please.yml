@@ -142,15 +142,7 @@ jobs:
             "out/StandingOrderJob.binlog" \
             --clobber
 
-          body="$(gh release view "$TAG" --json body -q .body | python3 -c '
-          import sys
-          text = sys.stdin.read()
-          for marker in ("\n### Build provenance & checksums", "\n### Package checksums (SHA-256)"):
-              idx = text.find(marker)
-              if idx != -1:
-                  text = text[:idx]
-          print(text.rstrip())
-          ')"
+          body="$(gh release view "$TAG" --json body -q .body | python3 .github/scripts/release_artifact.py prepare-release-body --meitou-json out/StandingOrderJob/meitou.json)"
 
           {
             printf '%s\n\n' "$body"
