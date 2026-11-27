@@ -14,6 +14,9 @@ import shutil
 import stat
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -33,6 +36,10 @@ MAX_PREVIEW_BYTES = 1024 * 1024  # Steam Workshop 1 MiB preview image cap
 MAX_CHANGENOTE_CHARS = 4000
 MAX_NEXUS_CHANGELOG_CHARS = 65535
 MAX_DESCRIPTION_CHARS = 8000  # Steam Workshop ISteamUGC::SetItemDescription cap
+STEAM_PUBLISHED_FILE_DETAILS_URL = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+STEAM_API_TIMEOUT_SECONDS = 15
+VALID_UPDATE_DESCRIPTION_MODES: frozenset[str] = frozenset({"auto", "force", "skip"})
+SEMVER_TAG_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 SHA256_LINE_RE = re.compile(r"^([0-9a-fA-F]{64})\s+\*?(.+)$")
 POSITIVE_INT_RE = re.compile(r"^[1-9][0-9]*$")
 
@@ -721,6 +728,178 @@ def load_steam_description(
     return ""
 
 
+def _normalize_steam_description(text: str) -> str:
+    """Normalize a Steam BBCode description for idempotent equality comparison."""
+    escaped = escape_vdf_value(text)
+    lines = [line.rstrip() for line in escaped.splitlines()]
+    return "\n".join(lines).strip()
+
+
+def fetch_live_steam_description(
+    item_id: str,
+    timeout: int = STEAM_API_TIMEOUT_SECONDS,
+) -> tuple[str | None, str]:
+    """Fetch the live public Steam Workshop item description via Valve's unauthenticated Web API.
+
+    Returns (description, status_note). Returns (None, reason) when the item is private/hidden,
+    awaiting moderation, or unreachable so callers can fall back to git-tag diffing.
+    """
+    cleaned_id = item_id.strip()
+    if not POSITIVE_INT_RE.match(cleaned_id):
+        return None, "item ID unset"
+
+    body = urllib.parse.urlencode({"itemcount": "1", "publishedfileids[0]": cleaned_id}).encode("utf-8")
+    req = urllib.request.Request(
+        STEAM_PUBLISHED_FILE_DETAILS_URL,
+        data=body,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "StandingOrderJob-CI/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return None, f"Steam API unavailable ({type(exc).__name__})"
+
+    details = payload.get("response", {}).get("publishedfiledetails", [])
+    if not isinstance(details, list) or not details or not isinstance(details[0], dict):
+        return None, "Steam API returned no item details"
+
+    item = details[0]
+    result_code = item.get("result")
+    live_desc = item.get("description")
+    if result_code != 1 or not isinstance(live_desc, str):
+        return None, f"live item not publicly readable (result={result_code})"
+    return live_desc, "ok"
+
+
+def _semver_tag_key(tag: str) -> tuple[int, int, int, str] | None:
+    match = SEMVER_TAG_RE.match(tag.strip())
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)), tag.strip())
+
+
+def find_previous_release_tag(git_dir: Path, current_tag: str) -> str | None:
+    """Return the highest SemVer tag strictly below current_tag in git_dir, or None."""
+    cur_key = _semver_tag_key(current_tag)
+    if cur_key is None:
+        return None
+    result = subprocess.run(
+        ["git", "-C", str(git_dir), "tag", "--list"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    candidates: list[tuple[tuple[int, int, int, str], str]] = []
+    for raw in result.stdout.splitlines():
+        tag = raw.strip()
+        if not tag or tag == current_tag.strip():
+            continue
+        key = _semver_tag_key(tag)
+        if key is not None and key[:3] < cur_key[:3]:
+            candidates.append((key, tag))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0])
+    return candidates[-1][1]
+
+
+def _git_show_text(git_dir: Path, ref: str, rel_path: str) -> str | None:
+    res = subprocess.run(
+        ["git", "-C", str(git_dir), "show", f"{ref}:{rel_path}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return res.stdout if res.returncode == 0 else None
+
+
+def load_steam_description_at_git_ref(
+    git_dir: Path,
+    ref: str,
+    steam_template_rel: str,
+    copier_answers_rel: str,
+) -> str | None:
+    """Render Steam BBCode from docs/store/steam.md.jinja + .copier-answers.yml at a git ref."""
+    tpl_text = _git_show_text(git_dir, ref, steam_template_rel)
+    answers_text = _git_show_text(git_dir, ref, copier_answers_rel)
+    if not tpl_text or not answers_text:
+        return None
+    answers = parse_simple_yaml(answers_text)
+    rendered_md = render_store_template(tpl_text, answers)
+    if not rendered_md:
+        return None
+    return markdown_to_steam_bbcode(rendered_md)
+
+
+def resolve_steam_description_update(
+    mode: str,
+    item_id: str,
+    tag: str,
+    description_file: Path | None = None,
+    steam_template: Path | None = None,
+    copier_answers: Path | None = None,
+    git_dir: Path | None = None,
+    live_fetcher=fetch_live_steam_description,
+) -> tuple[str, str]:
+    """Decide whether to include 'description' in workshop.vdf based on auto/force/skip mode.
+
+    Returns (description_to_write, status_label). Empty description_to_write omits the VDF key.
+    """
+    cleaned_mode = (mode or "auto").strip().lower()
+    if cleaned_mode not in VALID_UPDATE_DESCRIPTION_MODES:
+        raise ValueError(
+            f"Invalid update_description mode {mode!r}; expected one of {sorted(VALID_UPDATE_DESCRIPTION_MODES)}."
+        )
+    if cleaned_mode == "skip":
+        return "", "omitted (update_description=skip)"
+
+    candidate = load_steam_description(
+        description_file=description_file,
+        steam_template=steam_template,
+        copier_answers=copier_answers,
+    )
+    if not candidate:
+        return "", "omitted (no description source configured)"
+
+    if cleaned_mode == "force":
+        return candidate, f"updated (forced, {len(candidate)} chars BBCode)"
+
+    # Auto mode: first compare against live public Steam Workshop description.
+    norm_candidate = _normalize_steam_description(candidate)
+    live_desc, live_note = live_fetcher(item_id)
+    if live_desc is not None:
+        if _normalize_steam_description(live_desc) == norm_candidate:
+            return "", "unchanged vs live Steam Workshop (omitted)"
+        return candidate, f"updated (changed vs live Steam Workshop, {len(candidate)} chars BBCode)"
+
+    # Fallback when item is private/hidden/moderated or live API is unavailable: diff vs previous git tag.
+    if git_dir is not None and steam_template is not None and copier_answers is not None and tag.strip():
+        prev_tag = find_previous_release_tag(git_dir, tag)
+        if prev_tag:
+            repo_root = git_dir.resolve()
+            try:
+                tpl_rel = steam_template.resolve().relative_to(repo_root).as_posix()
+                ans_rel = copier_answers.resolve().relative_to(repo_root).as_posix()
+            except ValueError:
+                tpl_rel = steam_template.as_posix()
+                ans_rel = copier_answers.as_posix()
+            prev_bbcode = load_steam_description_at_git_ref(git_dir, prev_tag, tpl_rel, ans_rel)
+            if prev_bbcode is not None:
+                if _normalize_steam_description(prev_bbcode) == norm_candidate:
+                    return "", f"unchanged vs git tag {prev_tag} (omitted; {live_note})"
+                return candidate, f"updated (changed vs git tag {prev_tag}, {len(candidate)} chars BBCode; {live_note})"
+
+    return candidate, f"updated (no baseline to diff, {len(candidate)} chars BBCode; {live_note})"
+
+
 def build_release_note_url(release_url: str, tag: str) -> str:
     """Append /releases/tag/<tag> to a GitHub repo URL when a tag is present; fall back cleanly when absent."""
     base = release_url.strip().rstrip("/")
@@ -755,19 +934,8 @@ def _strip_inline_md_for_plain_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def format_nexus_changelog(
-    changelog: str,
-    tag: str,
-    release_url: str,
-    commit_sha: str = "",
-    repo: str = "",
-    max_chars: int = MAX_NEXUS_CHANGELOG_CHARS,
-) -> str:
-    """Format GitHub Release notes into plain-text one-bullet-per-line entries for Nexus Mods.
-
-    Nexus Mods renders every non-empty line in a version changelog as its own bullet point
-    without Markdown/table support, so headings, tables, and bullet markers are stripped.
-    """
+def _extract_plain_changelog_bullets(changelog: str) -> tuple[list[str], str]:
+    """Extract clean plain-text change bullets and optional CI run URL from GitHub Release notes."""
     raw = changelog.replace("\r\n", "\n").replace("\r", "\n").strip()
 
     # Capture originating CI run URL before stripping the provenance/checksums tail.
@@ -808,6 +976,24 @@ def format_nexus_changelog(
         else:
             bullets.append(cleaned)
 
+    return bullets, ci_run_url
+
+
+def format_nexus_changelog(
+    changelog: str,
+    tag: str,
+    release_url: str,
+    commit_sha: str = "",
+    repo: str = "",
+    max_chars: int = MAX_NEXUS_CHANGELOG_CHARS,
+) -> str:
+    """Format GitHub Release notes into plain-text one-bullet-per-line entries for Nexus Mods.
+
+    Nexus Mods renders every non-empty line in a version changelog as its own bullet point
+    without Markdown/table support, so headings, tables, and bullet markers are stripped.
+    """
+    bullets, ci_run_url = _extract_plain_changelog_bullets(changelog)
+
     clean_tag = tag.strip()
     if not bullets:
         bullets.append(f"Release {clean_tag}" if clean_tag else "Release")
@@ -839,25 +1025,28 @@ def format_nexus_changelog(
 
 
 def format_changenote(changelog: str, tag: str, release_url: str, max_chars: int = MAX_CHANGENOTE_CHARS) -> str:
+    """Format GitHub Release notes into concise, link-safe Steam Workshop change notes."""
     clean_tag = tag.strip()
     target_url = build_release_note_url(release_url, clean_tag)
-    body = changelog.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if body:
-        # Convert Markdown links so Steam never sees "(https://..." which triggers its malicious link filter.
-        body = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"[url=\2]\1[/url]", body)
-        body = re.sub(r"\((https?://[^)\s]+)\)", r"\1", body)
+    bullets, _ci_run_url = _extract_plain_changelog_bullets(changelog)
+
+    # Strip any parenthesized URLs "(https://...)" so Steam's malicious link filter never triggers.
+    clean_bullets: list[str] = []
+    for entry in bullets:
+        sanitized = re.sub(r"\((https?://[^)\s]+)\)", r"\1", entry).strip()
+        if sanitized:
+            clean_bullets.append(f"- {sanitized}")
 
     if clean_tag:
         footer = f"Release {clean_tag} - {target_url}" if target_url else f"Release {clean_tag}"
     else:
         footer = f"Release - {target_url}" if target_url else "Release"
 
-    if not body:
+    if not clean_bullets:
         note = footer
-    elif target_url and target_url in body:
-        note = body
     else:
-        note = f"{body}\n\n{footer}"
+        body = "\n".join(clean_bullets)
+        note = body if (target_url and target_url in body) else f"{body}\n\n{footer}"
 
     if len(note) > max_chars:
         suffix = f"\n...\nFull changelog: {target_url}" if target_url else "\n..."
@@ -1149,11 +1338,16 @@ def cmd_generate_vdf(args: argparse.Namespace) -> int:
         changelog = Path(args.changelog_file).read_text(encoding="utf-8") if args.changelog_file else ""
         preview = Path(args.preview_file) if args.preview_file else None
         staging = Path(args.staging_dir) if args.staging_dir else None
-        description = load_steam_description(
+        description, description_status = resolve_steam_description_update(
+            mode=args.update_description,
+            item_id=args.item_id,
+            tag=args.tag,
             description_file=Path(args.description_file) if args.description_file else None,
             steam_template=Path(args.steam_template) if args.steam_template else None,
             copier_answers=Path(args.copier_answers) if args.copier_answers else None,
+            git_dir=Path(args.git_dir) if args.git_dir else None,
         )
+        print(f"Steam Workshop description policy ({args.update_description}): {description_status}")
         result = generate_workshop_vdf(
             item_id=args.item_id,
             content_folder=Path(args.content_folder),
@@ -1167,6 +1361,7 @@ def cmd_generate_vdf(args: argparse.Namespace) -> int:
             staging_dir=staging,
             description=description,
         )
+        result["description_status"] = description_status
     except ValueError as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
@@ -1218,6 +1413,8 @@ def main(argv: list[str] | None = None) -> int:
     p_vdf.add_argument("--description-file", default="")
     p_vdf.add_argument("--steam-template", default="")
     p_vdf.add_argument("--copier-answers", default="")
+    p_vdf.add_argument("--update-description", default="auto", choices=sorted(VALID_UPDATE_DESCRIPTION_MODES))
+    p_vdf.add_argument("--git-dir", default=".")
     p_vdf.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
     p_vdf.set_defaults(func=cmd_generate_vdf)
 

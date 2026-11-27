@@ -6,12 +6,12 @@ Authoritative player-visible behaviors, edge cases, and the verification matrix 
 
 ## Package
 
-- **Classification:** Meitou C# code mod (`apiVersion` 3; `TaskType 1000` named `Stand Here`).
-- **Compatible range:** `>=0.23.0 <0.24.0` (`meitou.json`).
+- **Classification:** Meitou C# code mod (`apiVersion` 3; `TaskType 400000` named `Stand Here`).
+- **Meitou `gameVersion`:** `>=0.24.0` (`meitou.json`; minimum version, no routine upper bound).
 
 ### Requirements & dependencies
 
-- **[Meitou Client](https://github.com/VlcekM/MeitouClient)**: matching `gameVersion` `>=0.23.0 <0.24.0`.
+- **[Meitou Client](https://github.com/VlcekM/MeitouClient)**: requires `gameVersion` `>=0.24.0`.
 
 Intended load order:
 
@@ -111,7 +111,7 @@ Both runs must report `pass` in the Actions summary. Live `publish-steam.yml` al
 
 1. Create the initial Kenshi Steam Workshop listing once (via Kenshi's native FCS Workshop uploader or an interactive SteamCMD bootstrap with `publishedfileid=0`), confirm ownership by the dedicated publishing account, and record the resulting ID in repository variable `STEAM_WORKSHOP_ITEM_ID`.
 2. Curate the Workshop page title, visibility, primary thumbnail, and **additional screenshot gallery** manually in the Steam Workshop web UI (`assets/screenshots/standing_order_context_menu.png` can be used as source art, subject to Steam's 1 MiB image cap).
-   - Routine `publish-steam.yml` uploads render `docs/store/steam.md.jinja` from `.copier-answers.yml`, convert it to Steam Workshop BBCode, and include `description` alongside `appid=233860`, `publishedfileid`, `contentfolder`, and `changenote` so the store description stays in sync with the repository. `title`, `visibility`, and `previewfile` remain omitted by default so manually curated artwork and visibility are never overwritten.
+   - Routine `publish-steam.yml` uploads render `docs/store/steam.md.jinja` from `.copier-answers.yml` into Steam Workshop BBCode and diff it automatically (`update_description=auto`, default) against the live Steam Workshop description via Valve's public `GetPublishedFileDetails` API — falling back to diffing against the previous git release tag when the item is private/hidden or under moderation. `"description"` is only included in `workshop.vdf` when it actually changed (or when `update_description=force` is selected), avoiding unnecessary Steam moderation re-checks on routine releases; `update_description=skip` always omits it. Steam `changenote` strips Markdown tables/headings into concise change bullets plus a single GitHub Release link. `title`, `visibility`, and `previewfile` remain omitted by default so manually curated artwork and visibility are never overwritten.
    - `previewfile` updates only the single primary thumbnail (not the screenshot gallery); set `-f update_preview=true -f preview_file=<repo-relative-path>` only for an intentional primary thumbnail change.
 3. Verify extracted staging & real subscription loading: `publish-steam.yml` extracts the verified ZIP, validates all three runtime files against `StandingOrderJob-<version>.contents.sha256` byte-for-byte, and uploads `StandingOrderJob/` contents so `StandingOrderJob.mod`, `meitou.json`, and `StandingOrderJob.dll` sit directly at `steamapps/workshop/content/233860/<STEAM_WORKSHOP_ITEM_ID>/` (required by Meitou's top-level Workshop mod discovery). `release-please.yml` invokes `publish-steam` alongside `publish-nexus` automatically on new releases (and optionally on recovered tags via `publish_steam=true`).
 

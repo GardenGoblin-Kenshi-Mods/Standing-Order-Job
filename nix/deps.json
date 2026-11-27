@@ -30,6 +30,11 @@
     "hash": "sha256-8tBh4Z0jT4e9f+e86izbUD+3r4z9MNECPsiWkuArI6s="
   },
   {
+    "pname": "Meitou.References",
+    "version": "0.23.2",
+    "hash": "sha256-cPf6ujOyPzLLl4Q8fRUfjAX3mWOF0neKaMV/MNCdAD8="
+  },
+  {
     "pname": "Microsoft.CodeAnalysis.Analyzers",
     "version": "3.11.0",
     "hash": "sha256-hQ2l6E6PO4m7i+ZsfFlEx+93UsLPo4IY3wDkNG11/Sw="
@@ -45,6 +50,11 @@
     "hash": "sha256-5Mzj3XkYYLkwDWh17r1NEXSbXwwWYQPiOmkSMlgo1JY="
   },
   {
+    "pname": "Microsoft.DotNet.ApiCompat.Task",
+    "version": "11.0.100",
+    "hash": "sha256-lgLY9gvP7eB7lCs8Q6dMo4U/kNn87oTGsNjWBKY2RDU="
+  },
+  {
     "pname": "Microsoft.DotNet.PlatformAbstractions",
     "version": "3.1.6",
     "hash": "sha256-RfM2qXiqdiamPkXr4IDkNc0IZSF9iTZv4uou/E7zNS0="
@@ -58,6 +68,11 @@
     "pname": "Microsoft.NETCore.Platforms",
     "version": "1.1.0",
     "hash": "sha256-FeM40ktcObQJk4nMYShB61H/E8B7tIKfl9ObJ0IOcCM="
+  },
+  {
+    "pname": "MoonSharp",
+    "version": "3.0.0-beta.1",
+    "hash": "sha256-d3nlMk6QdxYkMOv25xPl5cZwBMm44nk1HJ4hsnK5tpo="
   },
   {
     "pname": "NETStandard.Library",

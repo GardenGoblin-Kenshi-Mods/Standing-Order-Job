@@ -6,5 +6,5 @@
     "StandingOrderJob.dll"
   ],
   "entry": "StandingOrderJob.StandingOrderJobMod",
-  "gameVersion": ">=0.23.0 <0.24.0"
+  "gameVersion": ">=0.24.0"
 }

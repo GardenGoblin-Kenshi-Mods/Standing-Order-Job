@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     meitou-client = {
-      url = "github:VlcekM/MeitouClient/v0.23.2";
+      url = "github:VlcekM/MeitouClient/v0.24.0";
       flake = false;
     };
   };
@@ -77,12 +77,18 @@
               buildPhase = ''
                 runHook preBuild
 
+                # Nix mkDerivation exports `version` (the mod's version, e.g. 0.1.2), which MSBuild
+                # otherwise picks up as $(Version) when building MeitouClient ProjectReferences and
+                # trips ApiCompat CP0003 against the Meitou.References baseline.
+                unset version
                 export HOME="$TMPDIR/home"
                 export DOTNET_CLI_HOME="$TMPDIR/dotnet-cli"
                 export DOTNET_CLI_TELEMETRY_OPTOUT=1
                 export DOTNET_NOLOGO=1
                 export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
-                export NUGET_PACKAGES="$TMPDIR/nuget-packages"
+                # Trailing slash required: upstream Directory.Build.targets concatenates
+                # $(NuGetPackageRoot)meitou.references/... directly without a separator.
+                export NUGET_PACKAGES="$TMPDIR/nuget-packages/"
                 mkdir -p "$HOME" "$DOTNET_CLI_HOME" "$NUGET_PACKAGES" "$TMPDIR/work"
 
                 cat > "$TMPDIR/NuGet.Config" <<EOF

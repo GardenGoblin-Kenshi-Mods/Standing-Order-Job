@@ -39,7 +39,7 @@ def build_valid_release_artifacts(
         "StandingOrderJob/StandingOrderJob.dll": b"FAKE-DLL-BYTES",
         "StandingOrderJob/StandingOrderJob.mod": b"FAKE-MOD-BYTES",
         "StandingOrderJob/meitou.json": json.dumps(
-            {"id": "standing-order-job", "version": version, "gameVersion": ">=0.22.2 <0.23.0"}
+            {"id": "standing-order-job", "version": version, "gameVersion": ">=0.24.0"}
         ).encode("utf-8"),
     }
 
@@ -147,7 +147,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 verified = release_artifact.verify_zip_artifact(zip_path, zip_sha, expected_tag="v0.1.1")
                 self.assertEqual(verified["version"], "0.1.1")
                 self.assertEqual(verified["zip_name"], "StandingOrderJob-0.1.1.zip")
-                self.assertEqual(verified["description"], "MeitouClient code mod (>=0.22.2 <0.23.0)")
+                self.assertEqual(verified["description"], "MeitouClient code mod (>=0.24.0)")
                 self.assertNotIn("provenance", verified["description"].lower())
 
                 staged = release_artifact.stage_and_verify_steam_content(
@@ -265,7 +265,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.assertNotIn("visibility", parsed)
             self.assertNotIn("previewfile", parsed)
             self.assertIn("'quotes'", parsed["changenote"])
-            self.assertIn("C:\\path\\slash\nLine 2", parsed["changenote"])
+            self.assertIn("C:\\path\\slash\n- Line 2", parsed["changenote"])
             self.assertNotIn("\\n", parsed["changenote"])
 
             # Blank item ID fails closed on live, allowed as placeholder on dry-run.
@@ -428,12 +428,119 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertEqual(no_tag, f"Release - {base_repo}")
         self.assertNotIn("(http", no_tag)
 
-        # Markdown links and bare parenthesized URLs inside body are sanitized for Steam.
-        body = "Added feature ([#4](https://github.com/org/repo/issues/4)) (https://example.com/notes)"
+        # Markdown links, tables, provenance tail, and parenthesized URLs are cleaned for Steam.
+        body = (
+            "## [0.2.0](https://github.com/org/repo/compare/v0.1.0...v0.2.0) (2026-11-26)\n\n"
+            "### Features\n\n"
+            "* Added feature ([#4](https://github.com/org/repo/issues/4)) ([abc1234](https://github.com/org/repo/commit/abc1234)) (https://example.com/notes)\n\n"
+            "### Build provenance & checksums\n\n"
+            "- **Originating CI run:** https://github.com/org/repo/actions/runs/999\n\n"
+            "### Package checksums (SHA-256)\n\n"
+            "| File | SHA-256 |\n"
+            "| --- | --- |\n"
+            "| `StandingOrderJob-0.2.0.zip` | `deadbeef` |\n"
+        )
         note = release_artifact.format_changenote(body, "v0.2.0", base_repo)
         self.assertNotIn("(http", note)
-        self.assertIn("[url=https://github.com/org/repo/issues/4]#4[/url]", note)
+        self.assertNotIn("###", note)
+        self.assertNotIn("| File |", note)
+        self.assertNotIn("deadbeef", note)
+        self.assertIn("- Features: Added feature (#4) https://example.com/notes", note)
         self.assertIn(f"Release v0.2.0 - {base_repo}/releases/tag/v0.2.0", note)
+
+    def test_resolve_steam_description_update_live_diff_git_fallback_and_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_dir = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo_dir, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_dir, check=True)
+            tpl_path = repo_dir / "docs" / "store" / "steam.md.jinja"
+            tpl_path.parent.mkdir(parents=True)
+            ans_path = repo_dir / ".copier-answers.yml"
+
+            tpl_path.write_text("## Description\n\n{{ description | trim }}\n", encoding="utf-8")
+            ans_path.write_text('description: "Version one \\"quoted\\" text."\n', encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "v0.1.0"], cwd=repo_dir, check=True)
+            subprocess.run(["git", "tag", "v0.1.0"], cwd=repo_dir, check=True)
+
+            # Live Steam API matches (even with VDF quote normalization): omits description.
+            expected_bbcode = "[h2]Description[/h2]\nVersion one 'quoted' text."
+            desc_same, status_same = release_artifact.resolve_steam_description_update(
+                mode="auto",
+                item_id="3846152406",
+                tag="v0.1.1",
+                steam_template=tpl_path,
+                copier_answers=ans_path,
+                git_dir=repo_dir,
+                live_fetcher=lambda _id: (expected_bbcode + "\r\n", "ok"),
+            )
+            self.assertEqual(desc_same, "")
+            self.assertIn("unchanged vs live Steam Workshop", status_same)
+
+            # Live Steam API differs: includes description.
+            desc_diff, status_diff = release_artifact.resolve_steam_description_update(
+                mode="auto",
+                item_id="3846152406",
+                tag="v0.1.1",
+                steam_template=tpl_path,
+                copier_answers=ans_path,
+                git_dir=repo_dir,
+                live_fetcher=lambda _id: ("[h2]Description[/h2]\nOld live text.", "ok"),
+            )
+            self.assertIn("[h2]Description[/h2]", desc_diff)
+            self.assertIn("changed vs live Steam Workshop", status_diff)
+
+            # Live Steam API unavailable (private/hidden) + unchanged vs previous git tag v0.1.0: omits description.
+            desc_git_same, status_git_same = release_artifact.resolve_steam_description_update(
+                mode="auto",
+                item_id="3846152406",
+                tag="v0.1.1",
+                steam_template=tpl_path,
+                copier_answers=ans_path,
+                git_dir=repo_dir,
+                live_fetcher=lambda _id: (None, "live item not publicly readable (result=9)"),
+            )
+            self.assertEqual(desc_git_same, "")
+            self.assertIn("unchanged vs git tag v0.1.0", status_git_same)
+
+            # Edit description on working tree; git fallback detects change vs v0.1.0 and includes description.
+            ans_path.write_text("description: Updated description text.\n", encoding="utf-8")
+            desc_git_diff, status_git_diff = release_artifact.resolve_steam_description_update(
+                mode="auto",
+                item_id="3846152406",
+                tag="v0.1.1",
+                steam_template=tpl_path,
+                copier_answers=ans_path,
+                git_dir=repo_dir,
+                live_fetcher=lambda _id: (None, "live item not publicly readable (result=9)"),
+            )
+            self.assertIn("Updated description text.", desc_git_diff)
+            self.assertIn("changed vs git tag v0.1.0", status_git_diff)
+
+            # Explicit skip and force modes.
+            desc_skip, status_skip = release_artifact.resolve_steam_description_update(
+                mode="skip",
+                item_id="3846152406",
+                tag="v0.1.1",
+                steam_template=tpl_path,
+                copier_answers=ans_path,
+                git_dir=repo_dir,
+            )
+            self.assertEqual(desc_skip, "")
+            self.assertIn("update_description=skip", status_skip)
+
+            desc_force, status_force = release_artifact.resolve_steam_description_update(
+                mode="force",
+                item_id="3846152406",
+                tag="v0.1.1",
+                steam_template=tpl_path,
+                copier_answers=ans_path,
+                git_dir=repo_dir,
+                live_fetcher=lambda _id: ("[h2]Description[/h2]\nUpdated description text.", "ok"),
+            )
+            self.assertIn("Updated description text.", desc_force)
+            self.assertIn("forced", status_force)
 
     def test_format_nexus_changelog_emits_plain_bullet_lines_without_markdown_or_tables(self) -> None:
         release_body = """## [0.1.1](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.0...v0.1.1) (2026-11-26)

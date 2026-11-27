@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      update_description:
+        description: "Workshop description sync mode: auto (update only when changed), force (always update), or skip (never update)"
+        required: false
+        type: string
+        default: "auto"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -24,6 +29,15 @@ on:
         required: false
         type: boolean
         default: true
+      update_description:
+        description: "Workshop description sync mode: auto (update only when changed), force (always update), or skip (never update)"
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - force
+          - skip
       update_preview:
         description: "Intentionally update the primary Workshop thumbnail (omitted by default to preserve curated media)"
         required: false
@@ -130,6 +144,7 @@ jobs:
           CONTENT_FOLDER: ${{ steps.stage.outputs.content_folder }}
           TAG: ${{ steps.release.outputs.tag_name }}
           RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          UPDATE_DESCRIPTION: ${{ inputs.update_description || 'auto' }}
           UPDATE_PREVIEW: ${{ inputs.update_preview || false }}
           PREVIEW_FILE: ${{ inputs.preview_file || '' }}
         run: |
@@ -143,6 +158,8 @@ jobs:
             --staging-dir "$STEAM_WORK_ROOT/workshop-staging"
             --steam-template docs/store/steam.md.jinja
             --copier-answers .copier-answers.yml
+            --update-description "$UPDATE_DESCRIPTION"
+            --git-dir .
           )
           if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
@@ -227,6 +244,7 @@ jobs:
           ITEM_ID: ${{ steps.vdf.outputs.item_id }}
           WORKSHOP_URL: ${{ steps.vdf.outputs.workshop_url }}
           DESCRIPTION_CHARS: ${{ steps.vdf.outputs.description_chars }}
+          DESCRIPTION_STATUS: ${{ steps.vdf.outputs.description_status }}
           AUTH_STATUS: ${{ steps.auth.outputs.auth_status }}
           UPLOAD_STATUS: ${{ steps.upload.outputs.upload_status }}
           UPLOAD_DETAIL: ${{ steps.upload.outputs.upload_detail }}
@@ -251,7 +269,9 @@ jobs:
             echo "| ZIP SHA-256 | \`${ZIP_SHA256:-<unverified>}\` |"
             echo "| Staged contentfolder | \`${CONTENT_FOLDER:-<unstaged>}\` |"
             echo "| Workshop item ID | \`${ITEM_ID:-<unset>}\` |"
-            if [[ -n "$DESCRIPTION_CHARS" && "$DESCRIPTION_CHARS" != "0" ]]; then
+            if [[ -n "$DESCRIPTION_STATUS" ]]; then
+              echo "| Workshop description | \`${DESCRIPTION_STATUS}\` |"
+            elif [[ -n "$DESCRIPTION_CHARS" && "$DESCRIPTION_CHARS" != "0" ]]; then
               echo "| Workshop description | synced from \`docs/store/steam.md.jinja\` (\`${DESCRIPTION_CHARS}\` chars BBCode) |"
             fi
             if [[ -n "$WORKSHOP_URL" ]]; then

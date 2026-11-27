@@ -7,8 +7,8 @@ namespace StandingOrderJob;
 /// <summary>Shared constants, geometry helpers, and debug formatting for Stand Here.</summary>
 static class StandHereTypes
 {
-    /// <summary>Claimed with <c>AddJobType</c>; Meitou mod codes start at <see cref="SimulationExtensions.FirstModCode"/>.</summary>
-    public const TaskType JobType = (TaskType)SimulationExtensions.FirstModCode;
+    /// <summary>Claimed with <c>AddJobType</c>; allocated in the Garden Goblin reserved block (<c>400_000+</c>), well above <see cref="SimulationExtensions.FirstModCode"/> (<c>1000</c>) to avoid collisions with other mods.</summary>
+    public const TaskType JobType = (TaskType)400_000;
 
     public const string JobName = "Stand Here";
 

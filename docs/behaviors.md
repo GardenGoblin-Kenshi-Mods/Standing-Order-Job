@@ -4,7 +4,7 @@ This document is the authoritative **BDD North Star** for `Standing Order Job`: 
 
 ## Overview & scope
 
-`Standing Order Job` adds a `Stand Here` action to a selected player character's hold-right-click menu, with Shift assigning a visible permanent `Stand Here` job (`TaskType 1000`) tied to one standing coordinate per character and a configurable maximum return distance (`apiVersion: 3`, assembly `StandingOrderJob`).
+`Standing Order Job` adds a `Stand Here` action to a selected player character's hold-right-click menu, with Shift assigning a visible permanent `Stand Here` job (`TaskType 400000`) tied to one standing coordinate per character and a configurable maximum return distance (`apiVersion: 3`, assembly `StandingOrderJob`).
 
 - **Explicit non-goals (v0.1):** No formation spread/offset when multiple squad members are selected (every recipient receives the exact clicked character's snapshot coordinate), and no overriding of Shift ground-click travel.
 
@@ -31,7 +31,7 @@ This document is the authoritative **BDD North Star** for `Standing Order Job`: 
 - **When** `StandHereSystem.Apply` validates finite coordinates and eligible living non-animal player recipients,
 - **Then** for each eligible recipient:
   - Acquires a persistent `LastingId` (`world.LastingIds.GetOrGive`) and stores/overwrites `_points[lasting] = point` (the clicked target's snapshot position; no formation offset).
-  - Updates an existing `PermaJob(1000)` in-place via `PermaJobs.IndexOf` (preserving job-list priority) or appends `new PermaJob(1000, null, Hand.Null)` if absent.
+  - Updates an existing `PermaJob(400000)` in-place via `PermaJobs.IndexOf` (preserving job-list priority) or appends `new PermaJob(400000, null, Hand.Null)` if absent.
   - Enables `CharacterOrders.Jobs` and calls `DecisionSystem.Request`.
 - **Guards & edge cases:** Living incapacitated player characters **can** receive/update the job and point in `Apply` (only dead, animal, or non-player targets are skipped), while execution waits until they are conscious (`B-04`).
 
@@ -40,8 +40,8 @@ This document is the authoritative **BDD North Star** for `Standing Order Job`: 
 - **Given** a character has an active `Stand Here` job (`Jobs` enabled, conscious, non-animal player, stored `_points[lasting]`),
 - **When** `StandHereJobs.CanRun` and `Start` evaluate (`NearRadius = 1.5f` horizontal 2D metres, ignoring Y),
 - **Then**
-  - Outside `1.5m` horizontal radius: checks `DestinationAccess.WalkRefused(world, slot, 1000, point)` and, if passable, walks via `TaskRequest(CharacterTask.GoTo, 1000, TaskSource.Job) { Job = k, Point = point, Mode = cold.RunSpeed }`.
-  - Inside `1.5m` horizontal radius: starts `TaskRequest(CharacterTask.Idle, 1000, TaskSource.Job) { Job = k }`; on subsequent ticks, `CanRun` checks `IsNearPoint` before `run.Runs(task)` and returns `DecisionCheck.Runs` so arrival switching the hot task from `GoTo` to `Idle` never causes repath spam.
+  - Outside `1.5m` horizontal radius: checks `DestinationAccess.WalkRefused(world, slot, 400000, point)` and, if passable, walks via `TaskRequest(CharacterTask.GoTo, 400000, TaskSource.Job) { Job = k, Point = point, Mode = cold.RunSpeed }`.
+  - Inside `1.5m` horizontal radius: starts `TaskRequest(CharacterTask.Idle, 400000, TaskSource.Job) { Job = k }`; on subsequent ticks, `CanRun` checks `IsNearPoint` before `run.Runs(task)` and returns `DecisionCheck.Runs` so arrival switching the hot task from `GoTo` to `Idle` never causes repath spam.
 - **Guards & edge cases:** Incapacitated characters return `No("ineligible")` in `CanRun` until conscious, then resume walking to their saved point.
 
 ### `B-05` Interruptions & job-list priority
@@ -52,9 +52,9 @@ This document is the authoritative **BDD North Star** for `Standing Order Job`: 
 
 ### `B-06` Job removal & ghost-walk cancellation
 
-- **Given** a character loses their `Stand Here` job row from the Jobs panel (`PermaJobs.IndexOf(cold, 1000) < 0`),
+- **Given** a character loses their `Stand Here` job row from the Jobs panel (`PermaJobs.IndexOf(cold, 400000) < 0`),
 - **When** `StandHereSystem.PruneAndCancel` runs in `Inputs`,
-- **Then** `_points` removes `lasting` and `CancelGhostWalk` cancels any lingering `{ Source: TaskSource.Job, Row: 1000 }` running walk (`TaskStart.Stand` on hot `GoTo` and clears `cold.Running`).
+- **Then** `_points` removes `lasting` and `CancelGhostWalk` cancels any lingering `{ Source: TaskSource.Job, Row: 400000 }` running walk (`TaskStart.Stand` on hot `GoTo` and clears `cold.Running`).
 
 ### `B-07` Unloaded zones, persistence & determinism
 

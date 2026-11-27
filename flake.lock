@@ -3,16 +3,16 @@
     "meitou-client": {
       "flake": false,
       "locked": {
-        "lastModified": 1795622331,
-        "narHash": "sha256-8/MHAF/u4UAT9N+HiUDO7YBGxa7nlsOg55eAja4nQBQ=",
+        "lastModified": 1795745943,
+        "narHash": "sha256-6V5lrxjtjehuQg2W+BNTnKzDoAYW3X7567sI29UrTlM=",
         "owner": "VlcekM",
         "repo": "MeitouClient",
-        "rev": "25c729e4ee87195229d96b9b46776ce212ca10cf",
+        "rev": "5de4342aa41a45e22420da4642bd846a990dd58f",
         "type": "github"
       },
       "original": {
         "owner": "VlcekM",
-        "ref": "v0.23.2",
+        "ref": "v0.24.0",
         "repo": "MeitouClient",
         "type": "github"
       }

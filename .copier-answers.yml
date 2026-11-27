@@ -10,7 +10,7 @@ description: 'Pin squadmates to a spot and keep them there. Useful for gate guar
     context-menu convention Kenshi already uses for other jobs.
 
     '
-game_version: '>=0.23.0 <0.24.0'
+game_version: '>=0.24.0'
 include_agents_md: true
 include_ci: true
 include_release_please: true
