@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.1...v0.1.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **ci:** align Nexus Mods preflight and workflow with v3 API ([e33b95e](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/e33b95e0e33baf34950a5030540f0c83d8f32bec))
+* **ci:** simplify Nexus file description and format changelog as plain bullets ([5d6212f](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/5d6212f53809fc9623bf174b69ae1d2dc53dd712))
+
 ## [0.1.1](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.0...v0.1.1) (2026-11-26)
 
 
