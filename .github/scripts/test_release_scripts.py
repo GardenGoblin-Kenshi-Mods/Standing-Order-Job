@@ -147,6 +147,8 @@ class ReleaseArtifactTests(unittest.TestCase):
                 verified = release_artifact.verify_zip_artifact(zip_path, zip_sha, expected_tag="v0.1.1")
                 self.assertEqual(verified["version"], "0.1.1")
                 self.assertEqual(verified["zip_name"], "StandingOrderJob-0.1.1.zip")
+                self.assertEqual(verified["description"], "MeitouClient code mod (>=0.22.2 <0.23.0)")
+                self.assertNotIn("provenance", verified["description"].lower())
 
                 staged = release_artifact.stage_and_verify_steam_content(
                     zip_path=zip_path,
@@ -432,6 +434,64 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("(http", note)
         self.assertIn("[url=https://github.com/org/repo/issues/4]#4[/url]", note)
         self.assertIn(f"Release v0.2.0 - {base_repo}/releases/tag/v0.2.0", note)
+
+    def test_format_nexus_changelog_emits_plain_bullet_lines_without_markdown_or_tables(self) -> None:
+        release_body = """## [0.1.1](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.0...v0.1.1) (2026-11-26)
+
+
+### Features
+
+* **docs:** update mod descriptions ([8467d56](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/8467d56b58885f40501e7a518738ffd8aeeb5d67))
+
+* **ci:** release adjustments ([#12](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/pull/12))
+
+### Build provenance & checksums
+
+- **Originating CI run:** https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/actions/runs/45898934898
+- **Source commit:** https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/0448cd3c9c04d884273b2fc32fd33d043f831e15 (`0448cd3c9c04d884273b2fc32fd33d043f831e15`)
+
+### Package checksums (SHA-256)
+
+| File | SHA-256 |
+| --- | --- |
+| `StandingOrderJob-0.1.1.zip` | `3021817c9e50283a` |
+"""
+        formatted = release_artifact.format_nexus_changelog(
+            changelog=release_body,
+            tag="v0.1.1",
+            release_url="https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/releases/tag/v0.1.1",
+            commit_sha="0448cd3c9c04d884273b2fc32fd33d043f831e15",
+            repo="GardenGoblin-Kenshi-Mods/Standing-Order-Job",
+        )
+        lines = formatted.splitlines()
+        self.assertEqual(
+            lines,
+            [
+                "Features: docs: update mod descriptions",
+                "Features: ci: release adjustments (#12)",
+                "GitHub Release (checksums & attestations): https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/releases/tag/v0.1.1",
+                "Source commit: https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/0448cd3c9c04d884273b2fc32fd33d043f831e15",
+                "Originating CI run: https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/actions/runs/45898934898",
+            ],
+        )
+        for line in lines:
+            self.assertFalse(line.startswith(("#", "*", "-", "|")))
+            self.assertNotIn("**", line)
+            self.assertNotIn("`", line)
+
+        # Fallback when release notes have no change items.
+        fallback = release_artifact.format_nexus_changelog(
+            changelog="",
+            tag="v0.1.0",
+            release_url="https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/releases/tag/v0.1.0",
+        )
+        self.assertEqual(
+            fallback.splitlines(),
+            [
+                "Release v0.1.0",
+                "GitHub Release (checksums & attestations): https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/releases/tag/v0.1.0",
+            ],
+        )
 
 
 class NexusPreflightTests(unittest.TestCase):

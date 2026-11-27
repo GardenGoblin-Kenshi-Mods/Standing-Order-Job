@@ -31,6 +31,7 @@ REQUIRED_ARCHIVE_FILES: frozenset[str] = frozenset(
 ALLOWED_PREVIEW_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".gif"})
 MAX_PREVIEW_BYTES = 1024 * 1024  # Steam Workshop 1 MiB preview image cap
 MAX_CHANGENOTE_CHARS = 4000
+MAX_NEXUS_CHANGELOG_CHARS = 65535
 MAX_DESCRIPTION_CHARS = 8000  # Steam Workshop ISteamUGC::SetItemDescription cap
 SHA256_LINE_RE = re.compile(r"^([0-9a-fA-F]{64})\s+\*?(.+)$")
 POSITIVE_INT_RE = re.compile(r"^[1-9][0-9]*$")
@@ -202,6 +203,13 @@ def resolve_release(
     commit_sha = resolve_git_tag_commit(git_dir, tag_name) or str(release.get("targetCommitish") or "")
     release_url = str(release.get("url") or f"https://github.com/{repo}/releases/tag/{tag_name}")
     changelog = (str(release.get("body") or "")).strip() or f"Release {tag_name}"
+    nexus_changelog = format_nexus_changelog(
+        changelog=changelog,
+        tag=tag_name,
+        release_url=release_url,
+        commit_sha=commit_sha,
+        repo=repo,
+    )
 
     return {
         "tag_name": tag_name,
@@ -212,6 +220,7 @@ def resolve_release(
         "zip_sha_name": zip_sha_name,
         "contents_sha_name": contents_sha_name if contents_sha_name in asset_names else "",
         "changelog": changelog,
+        "nexus_changelog": nexus_changelog,
         "release": release,
     }
 
@@ -266,10 +275,7 @@ def verify_zip_artifact(zip_path: Path, zip_sha_path: Path, expected_tag: str) -
         raise ValueError(f"meitou.json version ({version!r}) does not match release tag ({expected_tag!r}).")
 
     game_version = str(meta.get("gameVersion", "")).strip()
-    description = (
-        f"MeitouClient code mod ({game_version}). "
-        f"Verify provenance/checksums: {REPO_URL}#build-transparency--verification"
-    )
+    description = f"MeitouClient code mod ({game_version})" if game_version else "MeitouClient code mod"
     if len(description) > 255:
         description = description[:252] + "..."
 
@@ -730,6 +736,108 @@ def build_release_note_url(release_url: str, tag: str) -> str:
     return base
 
 
+def _strip_inline_md_for_plain_text(text: str) -> str:
+    """Convert inline Markdown to clean plain text suitable for Nexus Mods bullet lines."""
+    # Drop trailing release-please commit links such as " ([8467d56](https://github.com/.../commit/...))".
+    text = re.sub(r"\s*\(\[[0-9a-fA-F]{7,40}\]\(https?://[^)\s]+\)\)", "", text)
+    # Collapse Markdown issue/PR links "[#12](https://...)" -> "#12".
+    text = re.sub(r"\[(#\d+)\]\(https?://[^)\s]+\)", r"\1", text)
+    # Convert remaining Markdown links "[label](url)" -> "label" (or "url" when label matches).
+    text = re.sub(
+        r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
+        lambda m: m.group(2) if m.group(1).strip() == m.group(2).strip() else m.group(1).strip(),
+        text,
+    )
+    # Strip bold and inline code formatting.
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def format_nexus_changelog(
+    changelog: str,
+    tag: str,
+    release_url: str,
+    commit_sha: str = "",
+    repo: str = "",
+    max_chars: int = MAX_NEXUS_CHANGELOG_CHARS,
+) -> str:
+    """Format GitHub Release notes into plain-text one-bullet-per-line entries for Nexus Mods.
+
+    Nexus Mods renders every non-empty line in a version changelog as its own bullet point
+    without Markdown/table support, so headings, tables, and bullet markers are stripped.
+    """
+    raw = changelog.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    # Capture originating CI run URL before stripping the provenance/checksums tail.
+    ci_run_match = re.search(r"https?://github\.com/[^\s)]+/actions/runs/\d+", raw)
+    ci_run_url = ci_run_match.group(0) if ci_run_match else ""
+
+    notes_body = raw
+    for marker in ("### Build provenance & checksums", "### Package checksums (SHA-256)"):
+        idx = notes_body.find(marker)
+        if idx != -1:
+            notes_body = notes_body[:idx]
+            break
+
+    bullets: list[str] = []
+    current_section = ""
+    for line in notes_body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip horizontal rules and Markdown tables.
+        if re.fullmatch(r"[-*_]{3,}", stripped) or stripped.startswith("|"):
+            continue
+        # Skip top-level release title headings ("# ..." or "## [0.1.1](...)").
+        if re.match(r"^#{1,2}\s+", stripped):
+            continue
+        # Track section headings ("### Features", "### Bug Fixes", etc.) as prefixes.
+        sec_match = re.match(r"^#{3,6}\s+(.+)$", stripped)
+        if sec_match:
+            current_section = _strip_inline_md_for_plain_text(sec_match.group(1))
+            continue
+
+        item = re.sub(r"^(?:[-*+•]\s+|\d+\.\s+)", "", stripped)
+        cleaned = _strip_inline_md_for_plain_text(item)
+        if not cleaned:
+            continue
+        if current_section and not cleaned.lower().startswith(f"{current_section.lower()}:"):
+            bullets.append(f"{current_section}: {cleaned}")
+        else:
+            bullets.append(cleaned)
+
+    clean_tag = tag.strip()
+    if not bullets:
+        bullets.append(f"Release {clean_tag}" if clean_tag else "Release")
+
+    target_url = build_release_note_url(release_url, clean_tag)
+    if target_url:
+        bullets.append(f"GitHub Release (checksums & attestations): {target_url}")
+    clean_sha = commit_sha.strip()
+    clean_repo = repo.strip().strip("/")
+    if clean_sha and clean_repo:
+        bullets.append(f"Source commit: https://github.com/{clean_repo}/commit/{clean_sha}")
+    if ci_run_url:
+        bullets.append(f"Originating CI run: {ci_run_url}")
+
+    # Deduplicate while preserving order.
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entry in bullets:
+        if entry not in seen:
+            seen.add(entry)
+            deduped.append(entry)
+
+    result = "\n".join(deduped)
+    if len(result) > max_chars:
+        suffix = f"\nFull changelog: {target_url}" if target_url else "\n..."
+        keep = max(0, max_chars - len(suffix))
+        result = result[:keep].rstrip() + suffix
+    return result
+
+
 def format_changenote(changelog: str, tag: str, release_url: str, max_chars: int = MAX_CHANGENOTE_CHARS) -> str:
     clean_tag = tag.strip()
     target_url = build_release_note_url(release_url, clean_tag)
@@ -999,6 +1107,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             "zip_sha_name": str(info["zip_sha_name"]),
             "contents_sha_name": str(info["contents_sha_name"]),
             "changelog": str(info["changelog"]),
+            "nexus_changelog": str(info["nexus_changelog"]),
         },
     )
     return 0

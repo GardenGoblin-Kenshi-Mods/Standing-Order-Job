@@ -201,7 +201,7 @@ jobs:
           display_name: ${{ steps.verify.outputs.display_name }}
           description: ${{ steps.verify.outputs.description }}
           category: ${{ inputs.category || 'main' }}
-          changelog: ${{ steps.release.outputs.changelog }}
+          changelog: ${{ steps.release.outputs.nexus_changelog }}
           archive_existing_version: ${{ inputs.archive_existing_version }}
           update_mod_version: ${{ inputs.update_mod_version }}
           primary_mod_manager_download: ${{ (inputs.category || 'main') == 'main' }}

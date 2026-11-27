@@ -54,6 +54,8 @@ Nexus Mods v3 file uploads update an existing file chain on an already-created m
 
 **Duplicate-version preflight:** Before any live Nexus upload, `.github/scripts/nexus_preflight.py` queries Nexus Mods v3 `GET /v3/mod-files/<NEXUSMODS_FILE_ID>/versions` (using the same `apikey` header as `Nexus-Mods/upload-action`) and fails closed (nonzero exit, zero upload attempted, never logging HTTP error bodies) if the target version already exists on the mod file or if the API cannot be checked reliably. Dry runs report the preflight result when credentials are configured, or clearly note that credentialed API preflight was skipped.
 
+**File description & changelog formatting:** `publish-nexus.yml` sets the file description to `MeitouClient code mod (<gameVersion>)` and converts GitHub Release Markdown into plain-text one-bullet-per-line entries for Nexus Mods' Changelogs tab (stripping headings/tables/Markdown syntax and appending single-line links to the GitHub Release, source commit, and CI run).
+
 ```bash
 # Safe dry-run against the latest published GitHub Release
 gh workflow run publish-nexus.yml -R GardenGoblin-Kenshi-Mods/Standing-Order-Job
