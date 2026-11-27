@@ -26,6 +26,7 @@ AUTH_SUCCESS_PATTERN = re.compile(
 
 UPLOAD_SUCCESS_PATTERN = re.compile(r"\bSuccess\.", re.IGNORECASE)
 UPLOAD_FAILURE_PATTERN = re.compile(r"\bERROR!\b|Failed\s+to\s+update\s+workshop\s+item|Access\s+Denied", re.IGNORECASE)
+ACCESS_DENIED_PATTERN = re.compile(r"Access\s+Denied", re.IGNORECASE)
 
 # Matches KeyValues pairs inside a ConnectCache block so tokens can be masked/detected without logging.
 CONNECT_CACHE_BLOCK_RE = re.compile(r'"ConnectCache"\s*\{([^}]*)\}', re.DOTALL)
@@ -175,13 +176,55 @@ def evaluate_auth_log(log_text: str, exit_code: int, username: str = "") -> tupl
     return True, "Authenticated SteamCMD non-interactive login succeeded.", safe_lines
 
 
+def find_workshop_logs(steam_home: Path, steamcmd_dir: Path | None = None) -> list[Path]:
+    """Return deduplicated existing workshop_log.txt paths under SteamCMD directories."""
+    candidates: list[Path] = [
+        steam_home / ".steam" / "steam" / "logs" / "workshop_log.txt",
+        steam_home / ".local" / "share" / "Steam" / "logs" / "workshop_log.txt",
+        steam_home / "Steam" / "logs" / "workshop_log.txt",
+    ]
+    if steamcmd_dir is not None:
+        candidates.append(steamcmd_dir / "logs" / "workshop_log.txt")
+
+    found: list[Path] = []
+    seen_real: set[Path] = set()
+    for path in candidates:
+        if not path.is_file():
+            continue
+        real_path = path.resolve()
+        if real_path in seen_real:
+            continue
+        seen_real.add(real_path)
+        found.append(path)
+    return found
+
+
 def evaluate_upload_log(log_text: str, exit_code: int, username: str = "") -> tuple[bool, str, list[str]]:
-    """Evaluate SteamCMD workshop_build_item result."""
+    """Evaluate SteamCMD workshop_build_item result with session vs commit-permission clarity."""
     safe_lines = sanitize_steam_log(log_text, username=username)
     joined = "\n".join(safe_lines)
+    login_confirmed = bool(AUTH_SUCCESS_PATTERN.search(joined))
 
     if exit_code == 124:
         return False, "SteamCMD workshop_build_item timed out (exit=124).", safe_lines
+    if not login_confirmed:
+        for code, pattern in AUTH_FAILURE_PATTERNS:
+            if code != "steamcmd_error" and pattern.search(joined):
+                return (
+                    False,
+                    f"SteamCMD authentication failed during upload ({code}, exit={exit_code}). "
+                    "Session may be expired or revoked; refresh STEAM_CONFIG_VDF with tools/steam-login.sh.",
+                    safe_lines,
+                )
+    if login_confirmed and ACCESS_DENIED_PATTERN.search(joined):
+        return (
+            False,
+            f"SteamCMD login succeeded (config.vdf session is valid), but Steam rejected Committing update "
+            f"with Access Denied (exit={exit_code}). Verify item ownership/contributor permission for "
+            f"STEAM_WORKSHOP_ITEM_ID, Kenshi (233860) license / non-limited status on STEAM_USERNAME, "
+            f"and Steam Workshop Legal Agreement acceptance.",
+            safe_lines,
+        )
     if UPLOAD_FAILURE_PATTERN.search(joined):
         return False, f"SteamCMD workshop_build_item reported an error (exit={exit_code}).", safe_lines
     if exit_code != 0:
@@ -251,6 +294,15 @@ def cmd_check_upload_log(args: argparse.Namespace) -> int:
     print("Sanitized SteamCMD upload output (tail):")
     for line in safe_lines[-35:]:
         print(f"  {line}")
+    if not passed and args.steam_home:
+        steamcmd_dir = Path(args.steamcmd_dir) if args.steamcmd_dir else None
+        for workshop_log in find_workshop_logs(Path(args.steam_home), steamcmd_dir=steamcmd_dir):
+            raw_ws = workshop_log.read_text(encoding="utf-8", errors="replace")
+            ws_lines = sanitize_steam_log(raw_ws, username=args.username)
+            if ws_lines:
+                print(f"Sanitized SteamCMD workshop_log.txt tail ({workshop_log.name}):")
+                for line in ws_lines[-40:]:
+                    print(f"  {line}")
     status = "pass" if passed else "fail"
     write_github_output(args.github_output, {"upload_status": status, "upload_detail": reason})
     if passed:
@@ -286,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
     p_upload.add_argument("--log-file", required=True)
     p_upload.add_argument("--exit-code", type=int, required=True)
     p_upload.add_argument("--username", default="")
+    p_upload.add_argument("--steam-home", default="")
+    p_upload.add_argument("--steamcmd-dir", default="")
     p_upload.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
     p_upload.set_defaults(func=cmd_check_upload_log)
 

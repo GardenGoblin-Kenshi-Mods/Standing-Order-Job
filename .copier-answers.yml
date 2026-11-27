@@ -5,8 +5,8 @@ api_version: 3
 assembly_name: StandingOrderJob
 author: Garden Goblin
 description: 'Pin squadmates to a spot and keep them there. Useful for gate guards
-    and wall archers. Hold right-click a player character and choose Stand Here for
-    a one-shot move, or hold Shift to assign a permanent Stand Here job — the same
+    and wall archers. Right-click a player character and choose Stand Here for a
+    one-shot move, or hold Shift to assign a permanent Stand Here job — the same
     context-menu convention Kenshi already uses for other jobs.
 
     '

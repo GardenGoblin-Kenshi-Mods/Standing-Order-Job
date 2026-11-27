@@ -13,6 +13,10 @@ on:
         description: "Also publish recovered release to Nexus"
         type: boolean
         default: false
+      publish_steam:
+        description: "Also publish recovered release to Steam Workshop"
+        type: boolean
+        default: false
 
 concurrency:
   group: release-please-${{ github.repository }}
@@ -169,6 +173,15 @@ jobs:
     needs: [resolve-release, package-release]
     if: needs.package-release.result == 'success' && (inputs.release_tag == '' || inputs.publish_nexus == true)
     uses: ./.github/workflows/publish-nexus.yml
+    with:
+      release_tag: ${{ needs.resolve-release.outputs.tag_name }}
+      dry_run: false
+    secrets: inherit
+
+  publish-steam:
+    needs: [resolve-release, package-release]
+    if: needs.package-release.result == 'success' && (inputs.release_tag == '' || inputs.publish_steam == true)
+    uses: ./.github/workflows/publish-steam.yml
     with:
       release_tag: ${{ needs.resolve-release.outputs.tag_name }}
       dry_run: false

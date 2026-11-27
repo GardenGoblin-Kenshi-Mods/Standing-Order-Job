@@ -125,14 +125,78 @@ class SteamCiHelpersTests(unittest.TestCase):
         passed, _, _ = helpers.evaluate_upload_log("Preparing update...\nSuccess.\n", exit_code=0)
         self.assertTrue(passed)
 
-        failed_err, _, _ = helpers.evaluate_upload_log("ERROR! Failed to update workshop item (Access Denied)\n", exit_code=0)
+        failed_err, reason_err, _ = helpers.evaluate_upload_log(
+            "Logging in user 'GoblinBot' [U:1:123456789] to Steam Public...OK\n"
+            "Uploading content...\n"
+            "Committing update...ERROR! Failed to update workshop item (Access Denied).\n",
+            exit_code=9,
+            username="GoblinBot",
+        )
         self.assertFalse(failed_err)
+        self.assertIn("config.vdf session is valid", reason_err)
+        self.assertIn("Access Denied", reason_err)
+
+        failed_auth, reason_auth, _ = helpers.evaluate_upload_log(
+            "Cached credentials not found.\n",
+            exit_code=5,
+            username="GoblinBot",
+        )
+        self.assertFalse(failed_auth)
+        self.assertIn("Session may be expired", reason_auth)
 
         failed_no_success, _, _ = helpers.evaluate_upload_log("Preparing update...\n", exit_code=0)
         self.assertFalse(failed_no_success)
 
         failed_timeout, _, _ = helpers.evaluate_upload_log("Success.\n", exit_code=124)
         self.assertFalse(failed_timeout)
+
+    def test_cli_check_upload_log_dumps_sanitized_workshop_log_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            steam_home = root / "steam-home"
+            logs_dir = steam_home / ".local" / "share" / "Steam" / "logs"
+            logs_dir.mkdir(parents=True)
+            (steam_home / ".steam").mkdir(parents=True)
+            (steam_home / ".steam" / "steam").symlink_to(steam_home / ".local" / "share" / "Steam")
+            (logs_dir / "workshop_log.txt").write_text(
+                "[2026-11-27 02:25:24] SubmitItemUpdateResult for GoblinBot [U:1:987654321]: EResult=15 LegalAgreement=1 token=abcdef0123456789abcdef0123456789\n",
+                encoding="utf-8",
+            )
+            upload_log = root / "upload.log"
+            upload_log.write_text(
+                "Logging in user 'GoblinBot' [U:1:987654321] to Steam Public...OK\n"
+                "Committing update...ERROR! Failed to update workshop item (Access Denied).\n",
+                encoding="utf-8",
+            )
+            gh_out = root / "github_output.txt"
+
+            buf = io.StringIO()
+            err_buf = io.StringIO()
+            with redirect_stdout(buf):
+                old_stderr = sys.stderr
+                sys.stderr = err_buf
+                try:
+                    rc = helpers.main([
+                        "check-upload-log",
+                        "--log-file", str(upload_log),
+                        "--exit-code", "9",
+                        "--username", "GoblinBot",
+                        "--steam-home", str(steam_home),
+                        "--github-output", str(gh_out),
+                    ])
+                finally:
+                    sys.stderr = old_stderr
+
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn("Sanitized SteamCMD workshop_log.txt tail", out)
+            self.assertEqual(out.count("SubmitItemUpdateResult"), 1)  # symlink deduplicated
+            self.assertIn("EResult=15 LegalAgreement=1", out)
+            self.assertNotIn("GoblinBot", out)
+            self.assertNotIn("987654321", out)
+            self.assertNotIn("abcdef0123456789", out)
+            self.assertIn("upload_status=fail", gh_out.read_text(encoding="utf-8"))
+            self.assertIn("config.vdf session is valid", err_buf.getvalue())
 
     def test_cli_check_auth_log_writes_github_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

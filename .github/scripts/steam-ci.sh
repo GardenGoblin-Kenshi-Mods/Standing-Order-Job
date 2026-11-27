@@ -126,6 +126,8 @@ cmd_upload() {
         --log-file "$upload_log" \
         --exit-code "$upload_rc" \
         --username "$STEAM_USERNAME" \
+        --steam-home "$steam_home" \
+        --steamcmd-dir "$steamcmd_dir" \
         --github-output "${GITHUB_OUTPUT:-}"
     local check_rc=$?
     set -e
