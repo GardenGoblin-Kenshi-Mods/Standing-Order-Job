@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.2...v0.1.3) (2026-11-27)
+
+
+### Features
+
+* target Meitou v0.24.0, move TaskType to 400000, and add Steam description auto-diff ([f56fe73](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/f56fe73fdec10a0b0ba91b8a4070b05850ff8df9))
+
+
+### Bug Fixes
+
+* **ci:** wire Steam publishing into releases, add workshop_log diagnostics, and tighten README catch line ([a80dfa5](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/commit/a80dfa5ff2be4d6a56c7120b59c77230191927a9))
+
 ## [0.1.2](https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/compare/v0.1.1...v0.1.2) (2026-11-27)
 
 
