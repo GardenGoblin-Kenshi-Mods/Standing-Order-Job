@@ -119,6 +119,7 @@ jobs:
         id: verify
         env:
           TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
           ZIP_NAME: ${{ steps.release.outputs.zip_name }}
           ZIP_SHA_NAME: ${{ steps.release.outputs.zip_sha_name }}
         run: |
@@ -126,7 +127,8 @@ jobs:
           python3 .github/scripts/release_artifact.py verify-zip \
             --zip "$assets_dir/$ZIP_NAME" \
             --zip-sha "$assets_dir/$ZIP_SHA_NAME" \
-            --expected-tag "$TAG"
+            --expected-tag "$TAG" \
+            --release-url "$RELEASE_URL"
 
       - name: Validate Nexus Mods configuration
         id: config

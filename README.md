@@ -32,7 +32,7 @@ Pin squadmates to a spot and keep them there. Useful for gate guards and wall ar
 
 ## Requirements
 
-- **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (requires `>=0.24.0`)
+- **[Meitou Client](https://github.com/VlcekM/MeitouClient)** (latest version; for older Meitou Client compatibility versions, see GitHub Releases)
 
 ## Issues/Incompatibility
 

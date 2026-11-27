@@ -147,8 +147,22 @@ class ReleaseArtifactTests(unittest.TestCase):
                 verified = release_artifact.verify_zip_artifact(zip_path, zip_sha, expected_tag="v0.1.1")
                 self.assertEqual(verified["version"], "0.1.1")
                 self.assertEqual(verified["zip_name"], "StandingOrderJob-0.1.1.zip")
-                self.assertEqual(verified["description"], "MeitouClient code mod (>=0.24.0)")
+                self.assertEqual(
+                    verified["description"],
+                    "Release v0.1.1 - MeitouClient >=0.24.0 - https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job/releases/tag/v0.1.1",
+                )
                 self.assertNotIn("provenance", verified["description"].lower())
+
+                verified_custom = release_artifact.verify_zip_artifact(
+                    zip_path,
+                    zip_sha,
+                    expected_tag="v0.1.1",
+                    release_url="https://github.com/org/repo/releases/tag/v0.1.1",
+                )
+                self.assertEqual(
+                    verified_custom["description"],
+                    "Release v0.1.1 - MeitouClient >=0.24.0 - https://github.com/org/repo/releases/tag/v0.1.1",
+                )
 
                 staged = release_artifact.stage_and_verify_steam_content(
                     zip_path=zip_path,
@@ -362,11 +376,24 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("[olist]", bbcode)
         self.assertIn("[list]", bbcode)
         self.assertIn("[url=https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job]", bbcode)
+        self.assertIn("(latest version)", bbcode)
+        self.assertIn("Steam Workshop change notes or GitHub Releases.", bbcode)
+        self.assertNotIn(">=0.24.0", bbcode)
         self.assertNotIn("{{", bbcode)
         self.assertNotIn("{%", bbcode)
         self.assertNotIn("## ", bbcode)
         self.assertNotIn("](https://", bbcode)
         self.assertLessEqual(len(bbcode), release_artifact.MAX_DESCRIPTION_CHARS)
+
+        # Also verify Nexus store template omits pinned gameVersion and directs to archive files / GitHub Releases.
+        nexus_answers = release_artifact.parse_simple_yaml((mod_root / ".copier-answers.yml").read_text(encoding="utf-8"))
+        nexus_tpl_text = (mod_root / "docs" / "store" / "nexus.md.jinja").read_text(encoding="utf-8")
+        # Render via simple Jinja replace-free check on the Requirements section.
+        self.assertNotIn("game_version", nexus_tpl_text)
+        self.assertIn("(latest version)", nexus_tpl_text)
+        self.assertIn("archive files on Nexus Mods or GitHub Releases.", nexus_tpl_text)
+        self.assertNotIn(">=0.24.0", nexus_tpl_text)
+        self.assertTrue(nexus_answers["mod_name"])
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -408,7 +435,15 @@ class ReleaseArtifactTests(unittest.TestCase):
     def test_format_changenote_avoids_parenthesized_urls_and_handles_tag_fallback(self) -> None:
         base_repo = "https://github.com/GardenGoblin-Kenshi-Mods/Standing-Order-Job"
 
-        # With tag on repo URL: appends /releases/tag/<tag> and never wraps URL in parentheses.
+        # With tag, game_version, and repo URL: formats 'Release vX.X.X - MeitouClient <floor> - <url>'.
+        with_tag_and_floor = release_artifact.format_changenote("", "v0.1.0", base_repo, game_version=">=0.24.0")
+        self.assertEqual(
+            with_tag_and_floor,
+            f"Release v0.1.0 - MeitouClient >=0.24.0 - {base_repo}/releases/tag/v0.1.0",
+        )
+        self.assertNotIn("(http", with_tag_and_floor)
+
+        # Without game_version: omits the MeitouClient segment cleanly.
         with_tag = release_artifact.format_changenote("", "v0.1.0", base_repo)
         self.assertEqual(
             with_tag,
@@ -417,10 +452,12 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("(http", with_tag)
 
         # Already tag-scoped release URL is not duplicated.
-        already_tagged = release_artifact.format_changenote("", "v0.1.0", f"{base_repo}/releases/tag/v0.1.0")
+        already_tagged = release_artifact.format_changenote(
+            "", "v0.1.0", f"{base_repo}/releases/tag/v0.1.0", game_version=">=0.24.0"
+        )
         self.assertEqual(
             already_tagged,
-            f"Release v0.1.0 - {base_repo}/releases/tag/v0.1.0",
+            f"Release v0.1.0 - MeitouClient >=0.24.0 - {base_repo}/releases/tag/v0.1.0",
         )
 
         # Fallback to no tag when tag is blank.
@@ -440,13 +477,40 @@ class ReleaseArtifactTests(unittest.TestCase):
             "| --- | --- |\n"
             "| `StandingOrderJob-0.2.0.zip` | `deadbeef` |\n"
         )
-        note = release_artifact.format_changenote(body, "v0.2.0", base_repo)
+        note = release_artifact.format_changenote(body, "v0.2.0", base_repo, game_version=">=0.24.0")
         self.assertNotIn("(http", note)
         self.assertNotIn("###", note)
         self.assertNotIn("| File |", note)
         self.assertNotIn("deadbeef", note)
+        self.assertTrue(note.startswith(f"Release v0.2.0 - MeitouClient >=0.24.0 - {base_repo}/releases/tag/v0.2.0\n\n"))
         self.assertIn("- Features: Added feature (#4) https://example.com/notes", note)
-        self.assertIn(f"Release v0.2.0 - {base_repo}/releases/tag/v0.2.0", note)
+
+        # generate_workshop_vdf reads gameVersion from content_folder/meitou.json when not passed explicitly.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            content = root / "extract" / "StandingOrderJob"
+            content.mkdir(parents=True)
+            (content / "meitou.json").write_text(
+                json.dumps({"id": "standing-order-job", "version": "0.1.3", "gameVersion": ">=0.24.0"}),
+                encoding="utf-8",
+            )
+            vdf_out = root / "workshop.vdf"
+            with redirect_stdout(io.StringIO()):
+                release_artifact.generate_workshop_vdf(
+                    item_id="3846152406",
+                    content_folder=content,
+                    vdf_out=vdf_out,
+                    changelog="### Features\n\n* Added X",
+                    tag="v0.1.3",
+                    release_url=base_repo,
+                    dry_run=False,
+                )
+            _root_key, parsed = release_artifact.parse_simple_vdf(vdf_out.read_text(encoding="utf-8"))
+            self.assertTrue(
+                parsed["changenote"].startswith(
+                    f"Release v0.1.3 - MeitouClient >=0.24.0 - {base_repo}/releases/tag/v0.1.3\n\n- Features: Added X"
+                )
+            )
 
     def test_resolve_steam_description_update_live_diff_git_fallback_and_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

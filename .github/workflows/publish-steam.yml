@@ -114,6 +114,7 @@ jobs:
         id: verify
         env:
           TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
           ZIP_NAME: ${{ steps.release.outputs.zip_name }}
           ZIP_SHA_NAME: ${{ steps.release.outputs.zip_sha_name }}
         run: |
@@ -121,7 +122,8 @@ jobs:
           python3 .github/scripts/release_artifact.py verify-zip \
             --zip "$assets_dir/$ZIP_NAME" \
             --zip-sha "$assets_dir/$ZIP_SHA_NAME" \
-            --expected-tag "$TAG"
+            --expected-tag "$TAG" \
+            --release-url "$RELEASE_URL"
 
       - name: Stage and verify extracted Workshop content
         id: stage
@@ -144,6 +146,7 @@ jobs:
           CONTENT_FOLDER: ${{ steps.stage.outputs.content_folder }}
           TAG: ${{ steps.release.outputs.tag_name }}
           RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          GAME_VERSION: ${{ steps.verify.outputs.game_version }}
           UPDATE_DESCRIPTION: ${{ inputs.update_description || 'auto' }}
           UPDATE_PREVIEW: ${{ inputs.update_preview || false }}
           PREVIEW_FILE: ${{ inputs.preview_file || '' }}
@@ -155,6 +158,7 @@ jobs:
             --changelog-file "$STEAM_WORK_ROOT/release-assets/changelog.txt"
             --tag "$TAG"
             --release-url "$RELEASE_URL"
+            --game-version "$GAME_VERSION"
             --staging-dir "$STEAM_WORK_ROOT/workshop-staging"
             --steam-template docs/store/steam.md.jinja
             --copier-answers .copier-answers.yml

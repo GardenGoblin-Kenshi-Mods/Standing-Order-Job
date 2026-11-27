@@ -232,7 +232,12 @@ def resolve_release(
     }
 
 
-def verify_zip_artifact(zip_path: Path, zip_sha_path: Path, expected_tag: str) -> dict[str, str]:
+def verify_zip_artifact(
+    zip_path: Path,
+    zip_sha_path: Path,
+    expected_tag: str,
+    release_url: str = "",
+) -> dict[str, str]:
     """Fail-closed SHA-256, safe ZIP structure, and meitou.json version verification."""
     if not zip_path.is_file():
         raise ValueError(f"Downloaded ZIP archive is missing: {zip_path}")
@@ -282,7 +287,8 @@ def verify_zip_artifact(zip_path: Path, zip_sha_path: Path, expected_tag: str) -
         raise ValueError(f"meitou.json version ({version!r}) does not match release tag ({expected_tag!r}).")
 
     game_version = str(meta.get("gameVersion", "")).strip()
-    description = f"MeitouClient code mod ({game_version})" if game_version else "MeitouClient code mod"
+    effective_release_url = release_url.strip() or REPO_URL
+    description = format_release_summary_line(expected_tag, game_version, effective_release_url)
     if len(description) > 255:
         description = description[:252] + "..."
 
@@ -1024,10 +1030,31 @@ def format_nexus_changelog(
     return result
 
 
-def format_changenote(changelog: str, tag: str, release_url: str, max_chars: int = MAX_CHANGENOTE_CHARS) -> str:
-    """Format GitHub Release notes into concise, link-safe Steam Workshop change notes."""
+def format_release_summary_line(tag: str, game_version: str = "", release_url: str = "") -> str:
+    """Format 'Release <tag> - MeitouClient <game_version> - <release_url>' for Nexus descriptions and Steam change notes."""
     clean_tag = tag.strip()
-    target_url = build_release_note_url(release_url, clean_tag)
+    if clean_tag and not clean_tag.startswith("v"):
+        clean_tag = f"v{clean_tag}"
+    clean_game_version = game_version.strip()
+    target_url = build_release_note_url(release_url, clean_tag) if release_url else ""
+
+    parts: list[str] = [f"Release {clean_tag}" if clean_tag else "Release"]
+    if clean_game_version:
+        parts.append(f"MeitouClient {clean_game_version}")
+    if target_url:
+        parts.append(target_url)
+    return " - ".join(parts)
+
+
+def format_changenote(
+    changelog: str,
+    tag: str,
+    release_url: str,
+    game_version: str = "",
+    max_chars: int = MAX_CHANGENOTE_CHARS,
+) -> str:
+    """Format GitHub Release notes into concise, link-safe Steam Workshop change notes."""
+    header = format_release_summary_line(tag, game_version, release_url)
     bullets, _ci_run_url = _extract_plain_changelog_bullets(changelog)
 
     # Strip any parenthesized URLs "(https://...)" so Steam's malicious link filter never triggers.
@@ -1037,19 +1064,14 @@ def format_changenote(changelog: str, tag: str, release_url: str, max_chars: int
         if sanitized:
             clean_bullets.append(f"- {sanitized}")
 
-    if clean_tag:
-        footer = f"Release {clean_tag} - {target_url}" if target_url else f"Release {clean_tag}"
-    else:
-        footer = f"Release - {target_url}" if target_url else "Release"
-
     if not clean_bullets:
-        note = footer
+        note = header
     else:
         body = "\n".join(clean_bullets)
-        note = body if (target_url and target_url in body) else f"{body}\n\n{footer}"
+        note = f"{header}\n\n{body}"
 
     if len(note) > max_chars:
-        suffix = f"\n...\nFull changelog: {target_url}" if target_url else "\n..."
+        suffix = "\n..."
         keep = max(0, max_chars - len(suffix))
         note = note[:keep].rstrip() + suffix
     return note
@@ -1141,6 +1163,7 @@ def generate_workshop_vdf(
     preview_file: Path | None = None,
     staging_dir: Path | None = None,
     description: str = "",
+    game_version: str = "",
 ) -> dict[str, str]:
     """Generate and validate a Valve KeyValues workshop.vdf outside contentfolder."""
     cleaned_id = item_id.strip()
@@ -1201,7 +1224,14 @@ def generate_workshop_vdf(
             f"Steam's {MAX_DESCRIPTION_CHARS}-character limit."
         )
 
-    note = format_changenote(changelog, tag, release_url)
+    effective_game_version = game_version.strip()
+    if not effective_game_version:
+        meta_path = abs_content / "meitou.json"
+        if meta_path.is_file():
+            meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            effective_game_version = str(meta_payload.get("gameVersion", "")).strip()
+
+    note = format_changenote(changelog, tag, release_url, game_version=effective_game_version)
     fields: list[tuple[str, str]] = [
         ("appid", KENSHI_APP_ID),
         ("publishedfileid", effective_id),
@@ -1308,6 +1338,7 @@ def cmd_verify_zip(args: argparse.Namespace) -> int:
             zip_path=Path(args.zip),
             zip_sha_path=Path(args.zip_sha),
             expected_tag=args.expected_tag,
+            release_url=args.release_url,
         )
     except ValueError as exc:
         print(f"::error::{exc}", file=sys.stderr)
@@ -1360,6 +1391,7 @@ def cmd_generate_vdf(args: argparse.Namespace) -> int:
             preview_file=preview,
             staging_dir=staging,
             description=description,
+            game_version=args.game_version,
         )
         result["description_status"] = description_status
     except ValueError as exc:
@@ -1388,6 +1420,7 @@ def main(argv: list[str] | None = None) -> int:
     p_ver.add_argument("--zip", required=True)
     p_ver.add_argument("--zip-sha", required=True)
     p_ver.add_argument("--expected-tag", required=True)
+    p_ver.add_argument("--release-url", default="")
     p_ver.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
     p_ver.set_defaults(func=cmd_verify_zip)
 
@@ -1406,6 +1439,7 @@ def main(argv: list[str] | None = None) -> int:
     p_vdf.add_argument("--changelog-file", default="")
     p_vdf.add_argument("--tag", default="")
     p_vdf.add_argument("--release-url", required=True)
+    p_vdf.add_argument("--game-version", default="")
     p_vdf.add_argument("--dry-run", action="store_true")
     p_vdf.add_argument("--update-preview", action="store_true")
     p_vdf.add_argument("--preview-file", default="")
